@@ -1,0 +1,73 @@
+[package]
+name = "nonos_boot"
+version = "0.1.0"
+edition = "2021"
+authors = ["NØNOS Contributors <team@nonos.systems>"]
+description = "NØN•OS Capsule Bootloader — UEFI stage-0 loader for zero-trust capsule execution"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/NON-OS/nonos-boot"
+keywords = ["bootloader", "uefi", "zkproof", "os", "capsule"]
+categories = ["os::boot", "cryptography", "security"]
+readme = "../README.md"
+documentation = "https://docs.nonos.systems"
+
+[[bin]]
+name = "nonos_boot"
+path = "src/main.rs"
+
+[dependencies]
+uefi = { version = "0.23", features = ["alloc"] }
+uefi-services = "0.20"
+r-efi = "4.0.0"
+log = "0.4"
+xmas-elf = "0.8"
+zerocopy = "0.6"
+sha2 = { version = "0.10", default-features = false }
+bitflags = "2.4"
+uuid = { version = "1.6", default-features = false, features = ["macro-diagnostics"] }
+bootloader_api = { version = "0.11", default-features = false }
+
+# Capsule cryptographic pipeline
+blake3 = { version = "1.5", default-features = false, features = ["pure"] }
+ed25519-dalek = { version = "1.0", default-features = false, features = ["u64_backend"] }
+heapless = { version = "0.8", default-features = false }
+# rand = { version = "0.8", features = ["std"], default-features = false }  # Commented out - getrandom not supported in UEFI
+# digest = "0.10"  # Conflicts with uefi panic_impl
+halo2_proofs = { version = "0.2", optional = true }    # Future support for zkProofs
+snarkvm = { version = "0.11", optional = true }
+
+# Internal UI logger abstraction
+[target.'cfg(uefi)'.dependencies]
+# uefi-alloc = "0.1"
+
+[features]
+default = ["logging"]
+logging = []
+mock-proof = []
+efi-rng = []
+nonos-syscall-msr = []
+nonos-cet = []
+zk-snark = ["halo2_proofs"]
+zk-snarkvm = ["snarkvm"]
+
+[build-dependencies]
+cc = "1.0"
+embed-manifest = "1.4.0"
+
+[profile.release]
+opt-level = "z"
+lto = "fat"
+panic = "abort"
+strip = true
+codegen-units = 1
+debug = false
+overflow-checks = false
+incremental = false
+
+[profile.dev]
+opt-level = 1
+debug = true
+panic = "abort"
+overflow-checks = true
+
+[workspace]
