@@ -23,11 +23,6 @@ pub mod crypto {
     pub mod sig;
 }
 
-// ZK modules
-pub mod zk {
-    pub use crate::zkverify::*;
-}
-
 // Logging modules
 pub mod log {
     pub mod logger;
