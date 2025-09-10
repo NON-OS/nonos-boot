@@ -62,4 +62,6 @@ pub fn log_critical(category: &str, message: &str) {
 pub fn log_debug(category: &str, message: &str) {
     write_log("DEBUG", category, message);
 }
-
+pub fn log_error(category: &str, message: &str) {
+   write_log("ERROR", category, message);
+}
