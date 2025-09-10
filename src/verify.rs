@@ -8,7 +8,7 @@ use ed25519_dalek::{PublicKey, Signature, Verifier};
 use crate::capsule::zkmeta::requires_zk;
 use crate::crypto::sig::verify_signature;          // back with ed25519 
 use crate::log::logger::{log_info, log_warn};
-use crate::zk::zkverify::{verify_proof, ZkProof, ZkVerifyResult};
+use crate::zk::{verify_proof, ZkProof, ZkVerifyResult};
 
 use blake3;
 use sha2::{Digest, Sha256}; // optional if need SHA-256 addition elsewhere
