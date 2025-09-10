@@ -1,0 +1,11 @@
+/Users/abuhamzah/Dev/rust/projects/nonos-boot/target/x86_64-unknown-uefi/debug/deps/xmas_elf-93ba419df0779ad7.d: /Users/abuhamzah/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/xmas-elf-0.8.0/src/lib.rs /Users/abuhamzah/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/xmas-elf-0.8.0/src/header.rs /Users/abuhamzah/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/xmas-elf-0.8.0/src/sections.rs /Users/abuhamzah/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/xmas-elf-0.8.0/src/program.rs /Users/abuhamzah/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/xmas-elf-0.8.0/src/symbol_table.rs /Users/abuhamzah/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/xmas-elf-0.8.0/src/dynamic.rs /Users/abuhamzah/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/xmas-elf-0.8.0/src/hash.rs
+
+/Users/abuhamzah/Dev/rust/projects/nonos-boot/target/x86_64-unknown-uefi/debug/deps/libxmas_elf-93ba419df0779ad7.rmeta: /Users/abuhamzah/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/xmas-elf-0.8.0/src/lib.rs /Users/abuhamzah/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/xmas-elf-0.8.0/src/header.rs /Users/abuhamzah/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/xmas-elf-0.8.0/src/sections.rs /Users/abuhamzah/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/xmas-elf-0.8.0/src/program.rs /Users/abuhamzah/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/xmas-elf-0.8.0/src/symbol_table.rs /Users/abuhamzah/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/xmas-elf-0.8.0/src/dynamic.rs /Users/abuhamzah/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/xmas-elf-0.8.0/src/hash.rs
+
+/Users/abuhamzah/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/xmas-elf-0.8.0/src/lib.rs:
+/Users/abuhamzah/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/xmas-elf-0.8.0/src/header.rs:
+/Users/abuhamzah/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/xmas-elf-0.8.0/src/sections.rs:
+/Users/abuhamzah/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/xmas-elf-0.8.0/src/program.rs:
+/Users/abuhamzah/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/xmas-elf-0.8.0/src/symbol_table.rs:
+/Users/abuhamzah/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/xmas-elf-0.8.0/src/dynamic.rs:
+/Users/abuhamzah/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/xmas-elf-0.8.0/src/hash.rs:
