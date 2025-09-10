@@ -1,7 +1,0 @@
-/Users/abuhamzah/Dev/rust/projects/nonos-boot/target/x86_64-unknown-uefi/debug/deps/zero-513d9f209ab6a2bc.d: /Users/abuhamzah/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/zero-0.1.3/src/lib.rs
-
-/Users/abuhamzah/Dev/rust/projects/nonos-boot/target/x86_64-unknown-uefi/debug/deps/libzero-513d9f209ab6a2bc.rlib: /Users/abuhamzah/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/zero-0.1.3/src/lib.rs
-
-/Users/abuhamzah/Dev/rust/projects/nonos-boot/target/x86_64-unknown-uefi/debug/deps/libzero-513d9f209ab6a2bc.rmeta: /Users/abuhamzah/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/zero-0.1.3/src/lib.rs
-
-/Users/abuhamzah/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/zero-0.1.3/src/lib.rs:
