@@ -3,7 +3,7 @@ pub mod zkmeta;
 use crate::handoff::ZeroStateBootInfo;
 use crate::verify::verify_ed25519_signature;
 use xmas_elf::{
-    program::{ProgramHeader, Type},
+    program::Type,
     ElfFile,
 };
 
@@ -82,7 +82,7 @@ impl Capsule {
         }
 
         // Calculate total memory size needed for all LOAD segments
-        let mut total_size = 0;
+        let mut _total_size = 0;
         let mut min_addr = usize::MAX;
         let mut max_addr = 0;
 
@@ -100,7 +100,7 @@ impl Capsule {
             return Err("No loadable segments found");
         }
 
-        total_size = max_addr - min_addr;
+        _total_size = max_addr - min_addr;
 
         // Get 64 bytes of boot entropy
         let entropy_64 = crate::entropy::collect_boot_entropy_64()?;
