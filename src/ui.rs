@@ -8,10 +8,9 @@
 
 #![allow(dead_code)]
 
-use core::fmt::Write;
 use uefi::prelude::*;
 use uefi::proto::console::text::Color;
-use uefi::{cstr16, CStr16};
+use uefi::CStr16;
 
 /// Boot UI with a borrowed console handle (no unsafe global loads).
 pub struct Ui<'a> {
