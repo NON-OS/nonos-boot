@@ -13,13 +13,13 @@
 
 use crate::config::BootloaderConfig;
 use crate::hardware::HardwareInfo;
-use crate::log::logger::{log_debug, log_error, log_info, log_warn};
+use crate::log::logger::{log_error, log_info, log_warn};
 use crate::network::NetworkBootContext;
 use crate::security::SecurityContext;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use uefi::prelude::*;
-use uefi::{cstr16, CStr16};
+use uefi::cstr16;
 
 /// Test result enumeration
 #[derive(Debug, Clone, Copy, PartialEq)]
