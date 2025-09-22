@@ -1,6 +1,5 @@
 //! UEFI logging utilities for the bootloader
 
-use uefi::{cstr16, CStr16};
 
 /// Write a log message - simplified stub version for now
 /// In practice, this would need a way to access the mutable system table
