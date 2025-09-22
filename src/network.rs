@@ -13,7 +13,7 @@ use crate::log::logger::{log_debug, log_error, log_info, log_warn};
 use alloc::string::String;
 use alloc::vec::Vec;
 use uefi::prelude::*;
-use uefi::{cstr16, CStr16};
+use uefi::cstr16;
 
 /// Network boot configuration
 #[derive(Debug, Clone)]
