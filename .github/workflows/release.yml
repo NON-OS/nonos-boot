@@ -1,0 +1,79 @@
+name: Release N0N-OS Bootloader
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Install Rust
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        targets: x86_64-unknown-uefi
+        components: rust-src
+        
+    - name: Install build dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y build-essential nasm mtools dosfstools
+        
+    - name: Build release bootloader
+      run: |
+        cargo build --target x86_64-unknown-uefi --release
+        make build
+        
+    - name: Create release package
+      run: |
+        mkdir -p release
+        cp target/x86_64-unknown-uefi/release/nonos_boot.efi release/
+        cp target/build/nonos.img release/
+        cp README.md release/ 2>/dev/null || echo "# N0N-OS UEFI Bootloader" > release/README.md
+        cd release && tar -czf ../nonos-bootloader-${{ github.ref_name }}.tar.gz *
+        
+    - name: Generate checksums
+      run: |
+        cd release
+        sha256sum * > ../checksums.txt
+        
+    - name: Create GitHub Release
+      uses: softprops/action-gh-release@v1
+      with:
+        files: |
+          nonos-bootloader-${{ github.ref_name }}.tar.gz
+          checksums.txt
+        body: |
+          ## N0N-OS UEFI Bootloader ${{ github.ref_name }}
+          
+          ### Features
+          - UEFI-compatible bootloader for N0N-OS
+          - Zero-knowledge proof verification
+          - Ed25519 signature verification
+          - Advanced cryptographic capsule system
+          - NOX token integration ready
+          
+          ### Files
+          - `nonos_boot.efi` - UEFI bootloader binary
+          - `nonos.img` - Bootable disk image
+          - `checksums.txt` - SHA256 checksums
+          
+          ### Installation
+          1. Download the bootloader package
+          2. Extract to ESP partition: `/EFI/BOOT/BOOTX64.EFI`
+          3. Or use the complete disk image with QEMU
+          
+          Built with ❤️ by the N0N-OS team
+        draft: false
+        prerelease: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
