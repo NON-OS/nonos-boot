@@ -50,7 +50,6 @@ pub struct NetworkBootContext {
     pub config: NetworkConfig,
 }
 
-
 /// Initialize network boot subsystem
 pub fn initialize_network_boot(system_table: &mut SystemTable<Boot>) -> NetworkBootContext {
     let mut network = NetworkBootContext::default();
@@ -97,17 +96,18 @@ pub fn initialize_network_boot(system_table: &mut SystemTable<Boot>) -> NetworkB
 fn discover_network_interfaces(system_table: &mut SystemTable<Boot>) -> usize {
     let bs = system_table.boot_services();
     // Check for Simple Network Protocol
-    let interface_count = if let Ok(handles) = bs.find_handles::<uefi::proto::network::snp::SimpleNetwork>() {
-        let count = handles.len();
-        system_table
-            .stdout()
-            .output_string(cstr16!("   [SUCCESS] Simple Network interfaces found\r\n"))
-            .unwrap_or(());
-        log_info("network", "Simple Network interfaces detected");
-        count
-    } else {
-        0
-    };
+    let interface_count =
+        if let Ok(handles) = bs.find_handles::<uefi::proto::network::snp::SimpleNetwork>() {
+            let count = handles.len();
+            system_table
+                .stdout()
+                .output_string(cstr16!("   [SUCCESS] Simple Network interfaces found\r\n"))
+                .unwrap_or(());
+            log_info("network", "Simple Network interfaces detected");
+            count
+        } else {
+            0
+        };
 
     // Check for additional network protocols (availability varies by firmware)
     log_debug("network", "Additional network protocol scan completed");

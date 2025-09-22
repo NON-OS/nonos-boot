@@ -3,7 +3,7 @@
 
 #![allow(dead_code)]
 
-use ed25519_dalek::{VerifyingKey, Signature, Verifier};
+use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 
 use crate::capsule::zkmeta::requires_zk;
 use crate::crypto::sig::verify_signature; // back with ed25519 (recommended)

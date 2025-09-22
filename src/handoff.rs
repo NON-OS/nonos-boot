@@ -86,7 +86,7 @@ impl ZeroStateBootInfo {
 
     /// Safe memcpy into an out-parameter the kernel provides.
     /// (Useful if your boot code wants to place this at a known physical addr.)
-    /// 
+    ///
     /// # Safety
     /// The caller must ensure that `dst` is a valid pointer to uninitialized memory
     /// that can hold a `ZeroStateBootInfo` struct and is properly aligned.

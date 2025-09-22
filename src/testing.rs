@@ -126,7 +126,6 @@ pub struct TestingFramework {
     test_counter: u32,
 }
 
-
 impl TestingFramework {
     /// Create new testing framework
     pub fn new() -> Self {

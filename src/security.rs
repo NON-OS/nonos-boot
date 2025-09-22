@@ -25,7 +25,6 @@ pub struct SecurityContext {
     pub signature_database_valid: bool,
 }
 
-
 /// Initialize comprehensive security subsystem
 pub fn initialize_security_subsystem(system_table: &mut SystemTable<Boot>) -> SecurityContext {
     let mut security = SecurityContext::default();

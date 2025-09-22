@@ -17,7 +17,7 @@ use blake3; // add in Cargo.toml
 
 /// Custom getrandom implementation for UEFI environment
 /// This provides the getrandom backend that blake3 and other crypto libs need
-/// 
+///
 /// # Safety
 /// The caller must ensure that `buf` is a valid pointer to a mutable buffer
 /// of at least `len` bytes.

@@ -755,5 +755,6 @@ fn save_u8_variable(rt: &uefi::table::runtime::RuntimeServices, name: &CStr16, v
         &uefi::table::runtime::VariableVendor::GLOBAL_VARIABLE,
         attributes,
         &data,
-    ).is_ok()
+    )
+    .is_ok()
 }

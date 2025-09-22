@@ -14,7 +14,7 @@ use crate::log::logger::{log_debug, log_error, log_info, log_warn};
 use crate::verify::CapsuleMetadata;
 use alloc::vec::Vec;
 use blake3;
-use ed25519_dalek::{VerifyingKey, Signature, Verifier};
+use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 
 /// Certificate validation result
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -45,7 +45,6 @@ pub struct SignatureVerifier {
     pub certificate_store: Vec<Vec<u8>>,
     pub revocation_list: Vec<[u8; 32]>,
 }
-
 
 impl SignatureVerifier {
     /// Create new signature verifier with embedded public keys
