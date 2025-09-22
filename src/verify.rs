@@ -3,6 +3,9 @@
 
 #![allow(dead_code)]
 
+#[cfg(target_os = "uefi")]
+use ed25519_dalek::{PublicKey, Signature, Verifier};
+#[cfg(not(target_os = "uefi"))]
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 
 use crate::capsule::zkmeta::requires_zk;
@@ -52,11 +55,20 @@ pub fn verify_ed25519_signature(
     if signature_bytes.len() != 64 {
         return Err("Ed25519 signature must be exactly 64 bytes");
     }
+    
+    #[cfg(target_os = "uefi")]
+    let signature = Signature::from_bytes(signature_bytes).map_err(|_| "Invalid signature format")?;
+    #[cfg(not(target_os = "uefi"))]
     let signature = Signature::from_bytes(signature_bytes.try_into().unwrap());
 
     // Try verification against each trusted public key
     for (key_index, &key_bytes) in TRUSTED_PUBLIC_KEYS.iter().enumerate() {
-        match VerifyingKey::from_bytes(key_bytes) {
+        #[cfg(target_os = "uefi")]
+        let key_result = PublicKey::from_bytes(key_bytes);
+        #[cfg(not(target_os = "uefi"))]
+        let key_result = VerifyingKey::from_bytes(key_bytes);
+        
+        match key_result {
             Ok(public_key) => {
                 if public_key.verify(message, &signature).is_ok() {
                     log_info(
