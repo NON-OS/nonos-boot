@@ -14,6 +14,9 @@ use crate::log::logger::{log_debug, log_error, log_info, log_warn};
 use crate::verify::CapsuleMetadata;
 use alloc::vec::Vec;
 use blake3;
+#[cfg(target_os = "uefi")]
+use ed25519_dalek::{PublicKey, Signature, Verifier};
+#[cfg(not(target_os = "uefi"))]
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 
 /// Certificate validation result
@@ -84,6 +87,16 @@ impl SignatureVerifier {
         }
 
         // Parse public key
+        #[cfg(target_os = "uefi")]
+        let public_key = match PublicKey::from_bytes(public_key) {
+            Ok(key) => key,
+            Err(_) => {
+                log_error("crypto", "Failed to parse Ed25519 public key");
+                return SignatureStatus::MalformedSignature;
+            }
+        };
+        
+        #[cfg(not(target_os = "uefi"))]
         let public_key = match VerifyingKey::from_bytes(public_key) {
             Ok(key) => key,
             Err(_) => {
@@ -93,6 +106,16 @@ impl SignatureVerifier {
         };
 
         // Parse signature
+        #[cfg(target_os = "uefi")]
+        let signature = match Signature::from_bytes(signature) {
+            Ok(sig) => sig,
+            Err(_) => {
+                log_error("crypto", "Failed to parse Ed25519 signature");
+                return SignatureStatus::MalformedSignature;
+            }
+        };
+        
+        #[cfg(not(target_os = "uefi"))]
         let signature = Signature::from_bytes(signature);
 
         // Verify signature
