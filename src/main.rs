@@ -801,7 +801,10 @@ fn discover_hardware(system_table: &mut SystemTable<Boot>) {
     let mut _devices_found = 0;
 
     // Check for PCI Root Bridge Protocol
-    if bs.find_handles::<uefi::proto::device_path::DevicePath>().is_ok() {
+    if bs
+        .find_handles::<uefi::proto::device_path::DevicePath>()
+        .is_ok()
+    {
         _devices_found += 1;
     }
 
