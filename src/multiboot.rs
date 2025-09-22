@@ -6,8 +6,8 @@
 
 use crate::config::BootloaderConfig;
 use crate::log::logger::{log_debug, log_info};
-use uefi::prelude::*;
 use uefi::cstr16;
+use uefi::prelude::*;
 
 /// Boot entry types supported by the multi-boot system
 #[derive(Debug, Clone, PartialEq)]

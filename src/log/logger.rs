@@ -1,6 +1,5 @@
 //! UEFI logging utilities for the bootloader
 
-
 /// Write a log message - simplified stub version for now
 /// In practice, this would need a way to access the mutable system table
 fn write_log(_level: &str, _category: &str, _message: &str) {

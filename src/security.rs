@@ -11,8 +11,8 @@
 
 use crate::log::logger::{log_debug, log_error, log_info, log_warn};
 use blake3;
-use uefi::prelude::*;
 use uefi::cstr16;
+use uefi::prelude::*;
 
 /// Security context for the bootloader
 #[derive(Debug)]

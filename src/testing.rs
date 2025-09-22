@@ -18,8 +18,8 @@ use crate::network::NetworkBootContext;
 use crate::security::SecurityContext;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
-use uefi::prelude::*;
 use uefi::cstr16;
+use uefi::prelude::*;
 
 /// Test result enumeration
 #[derive(Debug, Clone, Copy, PartialEq)]

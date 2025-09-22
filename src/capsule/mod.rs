@@ -2,10 +2,7 @@ pub mod zkmeta;
 
 use crate::handoff::ZeroStateBootInfo;
 use crate::verify::verify_ed25519_signature;
-use xmas_elf::{
-    program::Type,
-    ElfFile,
-};
+use xmas_elf::{program::Type, ElfFile};
 
 /// Represents a verified kernel capsule
 #[derive(Debug)]

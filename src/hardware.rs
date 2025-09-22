@@ -10,8 +10,8 @@
 #![allow(dead_code)]
 
 use crate::log::logger::{log_debug, log_info, log_warn};
-use uefi::prelude::*;
 use uefi::cstr16;
+use uefi::prelude::*;
 
 /// ACPI Root System Description Pointer structure
 #[repr(C, packed)]
