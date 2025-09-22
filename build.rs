@@ -61,10 +61,11 @@ fn configure_optimization() {
 
 fn configure_crypto_features() {
     // Compile-time crypto feature detection
-    if cfg!(feature = "zk-snark") {
-        println!("cargo:rustc-cfg=feature=\"zk_proofs\"");
-        println!("cargo:rustc-env=NONOS_ZK_ENABLED=1");
-    }
+    // ZK features temporarily disabled for UEFI compatibility
+    // if cfg!(feature = "zk-snark") {
+    //     println!("cargo:rustc-cfg=feature=\"zk_proofs\"");
+    //     println!("cargo:rustc-env=NONOS_ZK_ENABLED=1");
+    // }
 
     if cfg!(feature = "efi-rng") {
         println!("cargo:rustc-cfg=feature=\"hardware_rng\"");
