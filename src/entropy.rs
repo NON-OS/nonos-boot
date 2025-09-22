@@ -17,8 +17,12 @@ use blake3; // add in Cargo.toml
 
 /// Custom getrandom implementation for UEFI environment
 /// This provides the getrandom backend that blake3 and other crypto libs need
+/// 
+/// # Safety
+/// The caller must ensure that `buf` is a valid pointer to a mutable buffer
+/// of at least `len` bytes.
 #[no_mangle]
-pub extern "C" fn getrandom(buf: *mut u8, len: usize, _flags: u32) -> isize {
+pub unsafe extern "C" fn getrandom(buf: *mut u8, len: usize, _flags: u32) -> isize {
     if buf.is_null() || len == 0 {
         return -1;
     }
@@ -58,7 +62,7 @@ pub fn get_rtc_timestamp() -> [u8; 8] {
     let st = unsafe { system_table().as_ref() };
     if let Ok(rtc) = st.runtime_services().get_time() {
         let mut buf = [0u8; 8];
-        buf[0..2].copy_from_slice(&(rtc.year() as u16).to_le_bytes());
+        buf[0..2].copy_from_slice(&rtc.year().to_le_bytes());
         buf[2] = rtc.month();
         buf[3] = rtc.day();
         buf[4] = rtc.hour();
@@ -115,7 +119,7 @@ pub fn collect_boot_entropy(bs: &BootServices) -> [u8; 64] {
     for round in 0..256u32 {
         let t1 = rdtsc_serialized();
         // Stall in microseconds; vary slightly to collect platform jitter
-        bs.stall(23 + ((round as usize * 7) % 17) as usize);
+        bs.stall(23 + ((round as usize * 7) % 17));
         let t2 = rdtsc_serialized();
         let delta = t2.wrapping_sub(t1);
 
@@ -138,7 +142,7 @@ pub fn collect_boot_entropy(bs: &BootServices) -> [u8; 64] {
         rtc_buf[6] = rtc.hour();
         rtc_buf[7] = rtc.minute();
         rtc_buf[8] = rtc.second();
-        rtc_buf[9..13].copy_from_slice(&(rtc.nanosecond() as u32).to_le_bytes());
+        rtc_buf[9..13].copy_from_slice(&rtc.nanosecond().to_le_bytes());
         rtc_buf[13] = match rtc.time_zone() {
             Some(tz) => tz as u8,
             None => 0,

@@ -170,7 +170,7 @@ fn discover_memory_topology(system_table: &mut SystemTable<Boot>) -> u64 {
     if let Ok(buffer_ptr) = bs.allocate_pages(
         uefi::table::boot::AllocateType::AnyPages,
         uefi::table::boot::MemoryType::LOADER_DATA,
-        (buffer_size + 4095) / 4096,
+        buffer_size.div_ceil(4096),
     ) {
         let buffer = unsafe { core::slice::from_raw_parts_mut(buffer_ptr as *mut u8, buffer_size) };
 
@@ -181,7 +181,7 @@ fn discover_memory_topology(system_table: &mut SystemTable<Boot>) -> u64 {
                 total_memory += desc.page_count * 4096;
             }
 
-            let _ = bs.free_pages(buffer_ptr, (buffer_size + 4095) / 4096);
+            let _ = bs.free_pages(buffer_ptr, buffer_size.div_ceil(4096));
             system_table
                 .stdout()
                 .output_string(cstr16!("   [SUCCESS] Memory topology analyzed\r\n"))
@@ -190,7 +190,7 @@ fn discover_memory_topology(system_table: &mut SystemTable<Boot>) -> u64 {
             return total_memory;
         }
 
-        let _ = bs.free_pages(buffer_ptr, (buffer_size + 4095) / 4096);
+        let _ = bs.free_pages(buffer_ptr, buffer_size.div_ceil(4096));
     }
 
     system_table

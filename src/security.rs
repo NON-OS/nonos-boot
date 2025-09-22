@@ -15,7 +15,7 @@ use uefi::cstr16;
 use uefi::prelude::*;
 
 /// Security context for the bootloader
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct SecurityContext {
     pub secure_boot_enabled: bool,
     pub tpm_available: bool,
@@ -25,18 +25,6 @@ pub struct SecurityContext {
     pub signature_database_valid: bool,
 }
 
-impl Default for SecurityContext {
-    fn default() -> Self {
-        Self {
-            secure_boot_enabled: false,
-            tpm_available: false,
-            measured_boot_active: false,
-            hardware_rng_available: false,
-            platform_key_verified: false,
-            signature_database_valid: false,
-        }
-    }
-}
 
 /// Initialize comprehensive security subsystem
 pub fn initialize_security_subsystem(system_table: &mut SystemTable<Boot>) -> SecurityContext {

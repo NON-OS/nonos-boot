@@ -127,16 +127,16 @@ impl Capsule {
             *blake3::hash(b"MOCK_PROOF_PLACEHOLDER").as_bytes()
         };
 
-        let handoff = crate::handoff::build_bootinfo(
-            data.as_ptr() as u64,
-            data.len() as u64,
-            commitment_hash,
-            0x100000,   // 1MB memory start (typical after firmware)
-            0x40000000, // 1GB total memory (will be updated by memory detection)
-            &entropy_64,
+        let handoff = crate::handoff::build_bootinfo(crate::handoff::BootInfoParams {
+            capsule_base: data.as_ptr() as u64,
+            capsule_size: data.len() as u64,
+            capsule_hash: commitment_hash,
+            memory_start: 0x100000,   // 1MB memory start (typical after firmware)
+            memory_size: 0x40000000, // 1GB total memory (will be updated by memory detection)
+            entropy64: entropy_64,
             rtc_utc,
-            crate::handoff::BootModeFlags::SECURE_BOOT | crate::handoff::BootModeFlags::COLD_START,
-        );
+            boot_flags: crate::handoff::BootModeFlags::SECURE_BOOT | crate::handoff::BootModeFlags::COLD_START,
+        });
 
         Ok(Capsule {
             base: data.as_ptr() as *mut u8,

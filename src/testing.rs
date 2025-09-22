@@ -119,21 +119,13 @@ impl TestSuite {
 }
 
 /// Comprehensive testing framework
+#[derive(Default)]
 pub struct TestingFramework {
     test_suites: Vec<TestSuite>,
     current_suite: Option<TestSuite>,
     test_counter: u32,
 }
 
-impl Default for TestingFramework {
-    fn default() -> Self {
-        Self {
-            test_suites: Vec::new(),
-            current_suite: None,
-            test_counter: 0,
-        }
-    }
-}
 
 impl TestingFramework {
     /// Create new testing framework

@@ -750,13 +750,10 @@ fn save_u8_variable(rt: &uefi::table::runtime::RuntimeServices, name: &CStr16, v
         | uefi::table::runtime::VariableAttributes::BOOTSERVICE_ACCESS
         | uefi::table::runtime::VariableAttributes::RUNTIME_ACCESS;
 
-    match rt.set_variable(
+    rt.set_variable(
         name,
         &uefi::table::runtime::VariableVendor::GLOBAL_VARIABLE,
         attributes,
         &data,
-    ) {
-        Ok(_) => true,
-        Err(_) => false,
-    }
+    ).is_ok()
 }

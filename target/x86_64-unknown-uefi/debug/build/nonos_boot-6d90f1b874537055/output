@@ -1,0 +1,21 @@
+cargo:rerun-if-changed=build.rs
+cargo:rerun-if-changed=src/
+cargo:rerun-if-changed=Cargo.toml
+cargo:rustc-link-arg=-nostdlib
+cargo:rustc-link-arg=-zmax-page-size=0x1000
+cargo:rustc-link-arg=-static
+cargo:rustc-link-arg=--gc-sections
+cargo:rustc-cfg=blake3_no_sse2
+cargo:rustc-cfg=blake3_no_sse41
+cargo:rustc-cfg=blake3_no_avx2
+cargo:rustc-cfg=blake3_no_avx512
+cargo:rustc-link-arg=-fstack-protector-strong
+cargo:rustc-link-arg=-fpie
+cargo:rustc-link-arg=/DYNAMICBASE
+cargo:rustc-link-arg=/HIGHENTROPYVA
+cargo:rustc-link-arg=/NXCOMPAT
+cargo:rustc-env=NONOS_BUILD_TIME=2025-09-22 13:46:47 UTC
+cargo:rustc-env=NONOS_GIT_COMMIT=386438d
+cargo:rustc-env=NONOS_RUSTC_VERSION=rustc 1.91.0-nightly (8e62bfd31 2025-08-12)
+cargo:rustc-env=NONOS_BOOTLOADER_NAME=NØNOS UEFI Capsule Bootloader
+cargo:rustc-env=NONOS_BOOTLOADER_VERSION=0.1.0

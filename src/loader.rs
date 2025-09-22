@@ -29,7 +29,7 @@ use uefi::CStr16;
 use xmas_elf::ElfFile;
 // extern crate alloc; // Removed - might cause issues
 use crate::entropy::collect_boot_entropy;
-use crate::handoff::{build_bootinfo, ZeroStateBootInfo};
+use crate::handoff::{build_bootinfo, BootInfoParams, ZeroStateBootInfo};
 use crate::log::logger::{log_info, log_warn};
 
 pub struct KernelCapsule {
@@ -84,7 +84,7 @@ pub fn load_kernel_capsule(st: &mut SystemTable<Boot>) -> Result<KernelCapsule, 
     }
 
     // Allocate just enough pages
-    let num_pages = (file_size + 4095) / 4096;
+    let num_pages = file_size.div_ceil(4096);
     let buffer = bs
         .allocate_pages(AllocateType::AnyPages, MemoryType::LOADER_DATA, num_pages)
         .map_err(|_| "[x] Failed to allocate capsule memory")?;
@@ -195,7 +195,7 @@ pub fn load_kernel_capsule(st: &mut SystemTable<Boot>) -> Result<KernelCapsule, 
 
     // Validate entry point is within expected kernel memory range
     // The kernel loads to 0x100000 (1MB) physical, so entry point should be near there
-    if physical_entry_point < 0x100000 || physical_entry_point >= 0x200000 {
+    if !(0x100000..0x200000).contains(&physical_entry_point) {
         log_warn("loader", "Entry point outside expected kernel range");
         // Still continue - this is just a warning for now
     } else {
@@ -211,16 +211,16 @@ pub fn load_kernel_capsule(st: &mut SystemTable<Boot>) -> Result<KernelCapsule, 
     // Create RTC timestamp
     let rtc_timestamp = crate::entropy::get_rtc_timestamp();
 
-    let handoff = build_bootinfo(
-        capsule_base_phys(buffer),
-        bytes_read as u64,
-        [0u8; 32], // Mock commitment for now - should use real hash
-        usable_memory_start,
-        total_memory,
-        &entropy64,
-        rtc_timestamp,
-        0, // boot_flags - could add debug, secure boot, etc.
-    );
+    let handoff = build_bootinfo(BootInfoParams {
+        capsule_base: capsule_base_phys(buffer),
+        capsule_size: bytes_read as u64,
+        capsule_hash: [0u8; 32], // Mock commitment for now - should use real hash
+        memory_start: usable_memory_start,
+        memory_size: total_memory,
+        entropy64,
+        rtc_utc: rtc_timestamp,
+        boot_flags: 0, // boot_flags - could add debug, secure boot, etc.
+    });
 
     Ok(KernelCapsule {
         entry_point: physical_entry_point,
@@ -251,7 +251,7 @@ fn get_memory_info(bs: &BootServices) -> (u64, u64) {
     if let Ok(buffer_ptr) = bs.allocate_pages(
         uefi::table::boot::AllocateType::AnyPages,
         uefi::table::boot::MemoryType::LOADER_DATA,
-        (buffer_size + 4095) / 4096,
+        buffer_size.div_ceil(4096),
     ) {
         let buffer = unsafe { slice::from_raw_parts_mut(buffer_ptr as *mut u8, buffer_size) };
 
@@ -276,7 +276,7 @@ fn get_memory_info(bs: &BootServices) -> (u64, u64) {
         }
 
         // Clean up allocated buffer
-        let _ = bs.free_pages(buffer_ptr, (buffer_size + 4095) / 4096);
+        let _ = bs.free_pages(buffer_ptr, buffer_size.div_ceil(4096));
     }
 
     log_info("memory", "Memory map analysis completed");

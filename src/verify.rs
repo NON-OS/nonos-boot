@@ -3,7 +3,7 @@
 
 #![allow(dead_code)]
 
-use ed25519_dalek::{PublicKey, Signature, Verifier};
+use ed25519_dalek::{VerifyingKey, Signature, Verifier};
 
 use crate::capsule::zkmeta::requires_zk;
 use crate::crypto::sig::verify_signature; // back with ed25519 (recommended)
@@ -49,12 +49,14 @@ pub fn verify_ed25519_signature(
     }
 
     // Parse the signature
-    let signature =
-        Signature::from_bytes(signature_bytes).map_err(|_| "Invalid signature format")?;
+    if signature_bytes.len() != 64 {
+        return Err("Ed25519 signature must be exactly 64 bytes");
+    }
+    let signature = Signature::from_bytes(signature_bytes.try_into().unwrap());
 
     // Try verification against each trusted public key
     for (key_index, &key_bytes) in TRUSTED_PUBLIC_KEYS.iter().enumerate() {
-        match PublicKey::from_bytes(key_bytes) {
+        match VerifyingKey::from_bytes(key_bytes) {
             Ok(public_key) => {
                 if public_key.verify(message, &signature).is_ok() {
                     log_info(
@@ -118,13 +120,11 @@ pub fn verify_capsule(blob: &[u8], meta: &CapsuleMetadata) -> CapsuleVerificatio
                 CapsuleVerification::Failed(e)
             }
         }
+    } else if verify_signature(blob, meta) {
+        log_info("verify", "Static signature accepted");
+        CapsuleVerification::StaticVerified
     } else {
-        if verify_signature(blob, meta) {
-            log_info("verify", "Static signature accepted");
-            CapsuleVerification::StaticVerified
-        } else {
-            CapsuleVerification::Failed("signature verification failed")
-        }
+        CapsuleVerification::Failed("signature verification failed")
     }
 }
 

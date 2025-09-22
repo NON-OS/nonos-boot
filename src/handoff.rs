@@ -37,7 +37,7 @@ pub const ZS_ABI_VERSION: u16 = 1;
 pub const ZS_HDR_SIZE: u16 = 128;
 
 #[repr(C, packed)]
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Default)]
 pub struct ZeroStateBootInfo {
     pub magic: u64,             // must == ZS_MAGIC
     pub abi_version: u16,       // must == ZS_ABI_VERSION
@@ -86,6 +86,10 @@ impl ZeroStateBootInfo {
 
     /// Safe memcpy into an out-parameter the kernel provides.
     /// (Useful if your boot code wants to place this at a known physical addr.)
+    /// 
+    /// # Safety
+    /// The caller must ensure that `dst` is a valid pointer to uninitialized memory
+    /// that can hold a `ZeroStateBootInfo` struct and is properly aligned.
     #[inline]
     pub unsafe fn copy_to(&self, dst: *mut ZeroStateBootInfo) {
         // structure is packed + POD; raw copy is fine
@@ -107,27 +111,30 @@ impl BootModeFlags {
 
 /* -------------------------- Builder helpers (boot side) -------------------------- */
 
+/// Parameters for building boot info
+pub struct BootInfoParams {
+    pub capsule_base: u64,
+    pub capsule_size: u64,
+    pub capsule_hash: [u8; 32],
+    pub memory_start: u64,
+    pub memory_size: u64,
+    pub entropy64: [u8; 64],
+    pub rtc_utc: [u8; 8],
+    pub boot_flags: u32,
+}
+
 /// Fill the handoff block from components. Truncates `entropy64` to 32 bytes to fit header.
 #[inline]
-pub fn build_bootinfo(
-    capsule_base: u64,
-    capsule_size: u64,
-    capsule_hash: [u8; 32],
-    memory_start: u64,
-    memory_size: u64,
-    entropy64: &[u8; 64],
-    rtc_utc: [u8; 8],
-    boot_flags: u32,
-) -> ZeroStateBootInfo {
+pub fn build_bootinfo(params: BootInfoParams) -> ZeroStateBootInfo {
     let mut info = ZeroStateBootInfo::new();
-    info.capsule_base = capsule_base;
-    info.capsule_size = capsule_size;
-    info.capsule_hash = capsule_hash;
-    info.memory_start = memory_start;
-    info.memory_size = memory_size;
-    info.boot_flags = boot_flags;
-    info.rtc_utc = rtc_utc;
-    info.entropy.copy_from_slice(&entropy64[..32]); // truncate to 32 to keep header 128B
+    info.capsule_base = params.capsule_base;
+    info.capsule_size = params.capsule_size;
+    info.capsule_hash = params.capsule_hash;
+    info.memory_start = params.memory_start;
+    info.memory_size = params.memory_size;
+    info.boot_flags = params.boot_flags;
+    info.rtc_utc = params.rtc_utc;
+    info.entropy.copy_from_slice(&params.entropy64[..32]); // truncate to 32 to keep header 128B
     info
 }
 

@@ -40,7 +40,7 @@ impl Default for NetworkConfig {
 }
 
 /// Network boot context
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct NetworkBootContext {
     pub interfaces_available: usize,
     pub active_interface: Option<usize>,
@@ -50,18 +50,6 @@ pub struct NetworkBootContext {
     pub config: NetworkConfig,
 }
 
-impl Default for NetworkBootContext {
-    fn default() -> Self {
-        Self {
-            interfaces_available: 0,
-            active_interface: None,
-            network_configured: false,
-            pxe_available: false,
-            http_client_available: false,
-            config: NetworkConfig::default(),
-        }
-    }
-}
 
 /// Initialize network boot subsystem
 pub fn initialize_network_boot(system_table: &mut SystemTable<Boot>) -> NetworkBootContext {
@@ -108,17 +96,18 @@ pub fn initialize_network_boot(system_table: &mut SystemTable<Boot>) -> NetworkB
 /// Discover available network interfaces
 fn discover_network_interfaces(system_table: &mut SystemTable<Boot>) -> usize {
     let bs = system_table.boot_services();
-    let mut interface_count = 0;
-
     // Check for Simple Network Protocol
-    if let Ok(handles) = bs.find_handles::<uefi::proto::network::snp::SimpleNetwork>() {
-        interface_count += handles.len();
+    let interface_count = if let Ok(handles) = bs.find_handles::<uefi::proto::network::snp::SimpleNetwork>() {
+        let count = handles.len();
         system_table
             .stdout()
             .output_string(cstr16!("   [SUCCESS] Simple Network interfaces found\r\n"))
             .unwrap_or(());
         log_info("network", "Simple Network interfaces detected");
-    }
+        count
+    } else {
+        0
+    };
 
     // Check for additional network protocols (availability varies by firmware)
     log_debug("network", "Additional network protocol scan completed");
@@ -172,7 +161,7 @@ fn configure_network_interface(
     system_table: &mut SystemTable<Boot>,
     config: &mut NetworkConfig,
 ) -> bool {
-    let bs = system_table.boot_services();
+    let _bs = system_table.boot_services();
 
     system_table
         .stdout()
@@ -594,14 +583,12 @@ pub fn perform_network_diagnostics(
 
 /// Test network stack integrity
 fn test_network_stack_integrity(system_table: &mut SystemTable<Boot>) -> bool {
-    let bs = system_table.boot_services();
+    let _bs = system_table.boot_services();
 
     // Check for essential network protocols
-    let mut stack_components = 0;
-
     // Check for basic network stack components
     // Note: Specific protocol availability varies by firmware implementation
-    stack_components = 1; // Assume basic stack is available if we got this far
+    let stack_components = 1; // Assume basic stack is available if we got this far
 
     // Consider stack intact if we have at least basic IP support
     stack_components >= 1

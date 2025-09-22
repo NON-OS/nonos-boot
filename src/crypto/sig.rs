@@ -14,7 +14,7 @@ use crate::log::logger::{log_debug, log_error, log_info, log_warn};
 use crate::verify::CapsuleMetadata;
 use alloc::vec::Vec;
 use blake3;
-use ed25519_dalek::{PublicKey, Signature, Verifier};
+use ed25519_dalek::{VerifyingKey, Signature, Verifier};
 
 /// Certificate validation result
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -38,7 +38,7 @@ pub enum SignatureStatus {
 }
 
 /// Advanced signature verification context
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct SignatureVerifier {
     pub trusted_ed25519_keys: Vec<[u8; 32]>,
     pub trusted_rsa_keys: Vec<Vec<u8>>,
@@ -46,16 +46,6 @@ pub struct SignatureVerifier {
     pub revocation_list: Vec<[u8; 32]>,
 }
 
-impl Default for SignatureVerifier {
-    fn default() -> Self {
-        Self {
-            trusted_ed25519_keys: Vec::new(),
-            trusted_rsa_keys: Vec::new(),
-            certificate_store: Vec::new(),
-            revocation_list: Vec::new(),
-        }
-    }
-}
 
 impl SignatureVerifier {
     /// Create new signature verifier with embedded public keys
@@ -95,7 +85,7 @@ impl SignatureVerifier {
         }
 
         // Parse public key
-        let public_key = match PublicKey::from_bytes(public_key) {
+        let public_key = match VerifyingKey::from_bytes(public_key) {
             Ok(key) => key,
             Err(_) => {
                 log_error("crypto", "Failed to parse Ed25519 public key");
@@ -104,13 +94,7 @@ impl SignatureVerifier {
         };
 
         // Parse signature
-        let signature = match Signature::from_bytes(signature) {
-            Ok(sig) => sig,
-            Err(_) => {
-                log_error("crypto", "Failed to parse Ed25519 signature");
-                return SignatureStatus::MalformedSignature;
-            }
-        };
+        let signature = Signature::from_bytes(signature);
 
         // Verify signature
         match public_key.verify(data, &signature) {

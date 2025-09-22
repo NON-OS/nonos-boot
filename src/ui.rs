@@ -127,8 +127,8 @@ impl<'a> Ui<'a> {
         let width = 32usize;
         let filled = ((current.min(total) * width) / total).min(width);
         let mut bar = [b' '; 32];
-        for i in 0..filled {
-            bar[i] = b'=';
+        for item in bar.iter_mut().take(filled) {
+            *item = b'=';
         }
         self.color(self.theme.info, self.theme.bg)?;
         self.raw("[")?;
