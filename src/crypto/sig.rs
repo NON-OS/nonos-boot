@@ -225,7 +225,7 @@ pub fn verify_signature(blob: &[u8], meta: &CapsuleMetadata) -> bool {
 pub fn perform_crypto_self_test() -> bool {
     log_info("crypto", "Performing comprehensive cryptographic self-test");
 
-    let verifier = SignatureVerifier::new();
+    let _verifier = SignatureVerifier::new();
 
     // Test 1: Hash consistency
     let test_data = b"NONOS cryptographic self-test vector";
