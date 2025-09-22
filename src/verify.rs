@@ -55,9 +55,10 @@ pub fn verify_ed25519_signature(
     if signature_bytes.len() != 64 {
         return Err("Ed25519 signature must be exactly 64 bytes");
     }
-    
+
     #[cfg(target_os = "uefi")]
-    let signature = Signature::from_bytes(signature_bytes).map_err(|_| "Invalid signature format")?;
+    let signature =
+        Signature::from_bytes(signature_bytes).map_err(|_| "Invalid signature format")?;
     #[cfg(not(target_os = "uefi"))]
     let signature = Signature::from_bytes(signature_bytes.try_into().unwrap());
 
@@ -67,7 +68,7 @@ pub fn verify_ed25519_signature(
         let key_result = PublicKey::from_bytes(key_bytes);
         #[cfg(not(target_os = "uefi"))]
         let key_result = VerifyingKey::from_bytes(key_bytes);
-        
+
         match key_result {
             Ok(public_key) => {
                 if public_key.verify(message, &signature).is_ok() {
