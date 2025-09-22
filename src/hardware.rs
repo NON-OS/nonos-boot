@@ -11,7 +11,7 @@
 
 use crate::log::logger::{log_debug, log_info, log_warn};
 use uefi::prelude::*;
-use uefi::{cstr16, CStr16};
+use uefi::cstr16;
 
 /// ACPI Root System Description Pointer structure
 #[repr(C, packed)]
@@ -154,7 +154,7 @@ fn validate_rsdp(rsdp_address: u64) -> bool {
 }
 
 /// Extract CPU count from ACPI tables
-fn get_cpu_count_from_acpi(rsdp_address: u64) -> usize {
+fn get_cpu_count_from_acpi(_rsdp_address: u64) -> usize {
     // This would require full ACPI parsing - simplified for now
     // In a real implementation, we'd parse the MADT (APIC) table
     log_debug("acpi", "CPU count extraction not yet implemented");
@@ -306,7 +306,7 @@ fn detect_cpu_features(system_table: &mut SystemTable<Boot>) {
     unsafe {
         // Check for basic CPUID support
         if has_cpuid() {
-            let (eax, ebx, ecx, edx) = cpuid(0);
+            let (_eax, _ebx, ecx, _edx) = cpuid(0);
 
             // Check various CPU features
             if ecx & (1 << 0) != 0 {
@@ -331,7 +331,7 @@ fn detect_cpu_features(system_table: &mut SystemTable<Boot>) {
             }
 
             // Check for security features
-            let (_, _, ecx_ext, edx_ext) = cpuid(0x80000001);
+            let (_, _, _ecx_ext, edx_ext) = cpuid(0x80000001);
             if edx_ext & (1 << 20) != 0 {
                 // NX bit
                 log_debug("cpu", "NX bit supported");
