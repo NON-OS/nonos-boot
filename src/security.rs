@@ -11,9 +11,8 @@
 
 use crate::log::logger::{log_debug, log_error, log_info, log_warn};
 use blake3;
-use ed25519_dalek::{PublicKey, Signature, Verifier};
 use uefi::prelude::*;
-use uefi::{cstr16, CStr16};
+use uefi::cstr16;
 
 /// Security context for the bootloader
 #[derive(Debug)]
