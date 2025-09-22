@@ -10,7 +10,6 @@
 #![allow(dead_code)]
 
 use crate::handoff::ZeroStateBootInfo;
-use core::mem::MaybeUninit;
 use uefi::table::boot::BootServices;
 use uefi_services::system_table;
 
@@ -215,7 +214,7 @@ fn rdtsc_serialized() -> u64 {
 #[inline(always)]
 fn rdseed64() -> Option<u64> {
     // SAFETY: intrinsic returns 1 on success, 0 otherwise
-    #[cfg(any(target_arch = "x86_64"))]
+    #[cfg(target_arch = "x86_64")]
     unsafe {
         let mut x: u64 = 0;
         let ok = core::arch::x86_64::_rdseed64_step(&mut x);
@@ -234,7 +233,7 @@ fn rdseed64() -> Option<u64> {
 /// Try RDRAND (returns Some(u64) on success)
 #[inline(always)]
 fn rdrand64() -> Option<u64> {
-    #[cfg(any(target_arch = "x86_64"))]
+    #[cfg(target_arch = "x86_64")]
     unsafe {
         let mut x: u64;
         let ok: u8;
