@@ -3,7 +3,6 @@
 
 #![allow(dead_code)]
 
-use alloc::vec::Vec;
 use ed25519_dalek::{PublicKey, Signature, Verifier};
 
 use crate::capsule::zkmeta::requires_zk;
