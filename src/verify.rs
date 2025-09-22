@@ -7,7 +7,7 @@ use alloc::vec::Vec;
 use ed25519_dalek::{PublicKey, Signature, Verifier};
 
 use crate::capsule::zkmeta::requires_zk;
-use crate::crypto::sig::verify_signature;          // back with ed25519 (recommended)
+use crate::crypto::sig::verify_signature; // back with ed25519 (recommended)
 use crate::log::logger::{log_info, log_warn};
 use crate::zk::zkverify::{verify_proof, ZkProof, ZkVerifyResult};
 
@@ -16,58 +16,65 @@ use sha2::{Digest, Sha256}; // optional if you still need SHA-256 elsewhere
 
 /// Domain separation labels
 const DS_CAPSULE_COMMIT: &str = "NONOS:CAPSULE:COMMITMENT:v1";
-const DS_PROGRAM_HASH:   &str = "NONOS:ZK:PROGRAM:v1";
+const DS_PROGRAM_HASH: &str = "NONOS:ZK:PROGRAM:v1";
 
 /// Trusted public key ring - embedded at compile time
 /// These keys are used to verify capsule signatures
 const TRUSTED_PUBLIC_KEYS: &[&[u8; 32]] = &[
     // Production public key #0 - replace with actual deployment keys
     &[
-        0xd7, 0x5a, 0x98, 0x01, 0x82, 0xb1, 0x0a, 0xb7,
-        0xd5, 0x4b, 0xfe, 0xd3, 0xc9, 0x64, 0x07, 0x3a,
-        0x0e, 0xe1, 0x72, 0xf3, 0xda, 0xa6, 0x23, 0x25,
-        0xaf, 0x02, 0x1a, 0x68, 0xf7, 0x07, 0x51, 0x1a
+        0xd7, 0x5a, 0x98, 0x01, 0x82, 0xb1, 0x0a, 0xb7, 0xd5, 0x4b, 0xfe, 0xd3, 0xc9, 0x64, 0x07,
+        0x3a, 0x0e, 0xe1, 0x72, 0xf3, 0xda, 0xa6, 0x23, 0x25, 0xaf, 0x02, 0x1a, 0x68, 0xf7, 0x07,
+        0x51, 0x1a,
     ],
     // Production public key #1 - for key rotation
     &[
-        0xe5, 0x29, 0x4e, 0x18, 0x3e, 0x01, 0x73, 0xd9,
-        0x46, 0xb4, 0xbd, 0x70, 0x87, 0x0b, 0x28, 0x62,
-        0x0d, 0xe3, 0x13, 0xf0, 0x81, 0x2a, 0x3c, 0x1b,
-        0x8f, 0x24, 0x9a, 0x43, 0xd1, 0x52, 0x0f, 0x6b
+        0xe5, 0x29, 0x4e, 0x18, 0x3e, 0x01, 0x73, 0xd9, 0x46, 0xb4, 0xbd, 0x70, 0x87, 0x0b, 0x28,
+        0x62, 0x0d, 0xe3, 0x13, 0xf0, 0x81, 0x2a, 0x3c, 0x1b, 0x8f, 0x24, 0x9a, 0x43, 0xd1, 0x52,
+        0x0f, 0x6b,
     ],
 ];
 
 /// Real ed25519 signature verification using ed25519-dalek
 /// This provides cryptographically secure verification against trusted keys
-pub fn verify_ed25519_signature(message: &[u8], signature_bytes: &[u8]) -> Result<bool, &'static str> {
+pub fn verify_ed25519_signature(
+    message: &[u8],
+    signature_bytes: &[u8],
+) -> Result<bool, &'static str> {
     if signature_bytes.len() != 64 {
         return Err("Ed25519 signature must be exactly 64 bytes");
     }
-    
+
     if message.is_empty() {
         return Err("Cannot verify signature of empty message");
     }
-    
+
     // Parse the signature
-    let signature = Signature::from_bytes(signature_bytes)
-        .map_err(|_| "Invalid signature format")?;
-    
+    let signature =
+        Signature::from_bytes(signature_bytes).map_err(|_| "Invalid signature format")?;
+
     // Try verification against each trusted public key
     for (key_index, &key_bytes) in TRUSTED_PUBLIC_KEYS.iter().enumerate() {
         match PublicKey::from_bytes(key_bytes) {
             Ok(public_key) => {
                 if public_key.verify(message, &signature).is_ok() {
-                    log_info("verify", &alloc::format!("Signature verified with trusted key #{}", key_index));
+                    log_info(
+                        "verify",
+                        &alloc::format!("Signature verified with trusted key #{}", key_index),
+                    );
                     return Ok(true);
                 }
             }
             Err(_) => {
-                log_warn("verify", &alloc::format!("Invalid public key #{} in trusted ring", key_index));
+                log_warn(
+                    "verify",
+                    &alloc::format!("Invalid public key #{} in trusted ring", key_index),
+                );
                 continue;
             }
         }
     }
-    
+
     Err("Signature verification failed against all trusted keys")
 }
 
@@ -166,7 +173,9 @@ fn slices_for<'a>(
     meta: &CapsuleMetadata,
 ) -> Result<(&'a [u8], &'a [u8]), &'static str> {
     let sig_start = meta.offset_sig;
-    let sig_end = sig_start.checked_add(meta.len_sig).ok_or("sig len overflow")?;
+    let sig_end = sig_start
+        .checked_add(meta.len_sig)
+        .ok_or("sig len overflow")?;
 
     let pay_start = meta.offset_payload;
     let pay_end = pay_start
@@ -181,7 +190,9 @@ fn slices_for<'a>(
     }
 
     // Disallow weird partial overlaps (allow equality if signature covers the whole payload)
-    if ranges_overlap(sig_start, sig_end, pay_start, pay_end) && !(sig_start == pay_start && sig_end == pay_end) {
+    if ranges_overlap(sig_start, sig_end, pay_start, pay_end)
+        && !(sig_start == pay_start && sig_end == pay_end)
+    {
         return Err("sig/payload overlap");
     }
 

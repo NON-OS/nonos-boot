@@ -11,15 +11,15 @@
 
 #![allow(dead_code)]
 
+use crate::config::BootloaderConfig;
+use crate::hardware::HardwareInfo;
+use crate::log::logger::{log_debug, log_error, log_info, log_warn};
+use crate::network::NetworkBootContext;
+use crate::security::SecurityContext;
+use alloc::string::{String, ToString};
+use alloc::vec::Vec;
 use uefi::prelude::*;
 use uefi::{cstr16, CStr16};
-use crate::log::logger::{log_info, log_warn, log_error, log_debug};
-use crate::security::SecurityContext;
-use crate::network::NetworkBootContext;
-use crate::hardware::HardwareInfo;
-use crate::config::BootloaderConfig;
-use alloc::vec::Vec;
-use alloc::string::{String, ToString};
 
 /// Test result enumeration
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -90,7 +90,7 @@ impl TestSuite {
             ..Default::default()
         }
     }
-    
+
     /// Add test case to suite
     pub fn add_test_case(&mut self, test_case: TestCase) {
         match test_case.result {
@@ -99,16 +99,16 @@ impl TestSuite {
             TestResult::Skip => self.skipped += 1,
             TestResult::Warning => self.warnings += 1,
         }
-        
+
         self.total_execution_time_ms += test_case.execution_time_ms;
         self.test_cases.push(test_case);
     }
-    
+
     /// Get total number of tests
     pub fn total_tests(&self) -> u32 {
         self.test_cases.len() as u32
     }
-    
+
     /// Calculate pass rate as percentage
     pub fn pass_rate(&self) -> f32 {
         if self.total_tests() == 0 {
@@ -140,7 +140,7 @@ impl TestingFramework {
     pub fn new() -> Self {
         Self::default()
     }
-    
+
     /// Start new test suite
     pub fn start_suite(&mut self, name: String) {
         if let Some(current) = self.current_suite.take() {
@@ -149,21 +149,21 @@ impl TestingFramework {
         self.current_suite = Some(TestSuite::new(name));
         log_info("testing", "Started new test suite");
     }
-    
+
     /// Add test result to current suite
     fn add_test_result(&mut self, test_case: TestCase) {
         if let Some(ref mut suite) = self.current_suite {
             suite.add_test_case(test_case);
         }
     }
-    
+
     /// Finish current test suite
     pub fn finish_suite(&mut self) {
         if let Some(current) = self.current_suite.take() {
             self.test_suites.push(current);
         }
     }
-    
+
     /// Run comprehensive bootloader tests
     pub fn run_comprehensive_tests(
         &mut self,
@@ -173,95 +173,116 @@ impl TestingFramework {
         network: &NetworkBootContext,
         hardware: &HardwareInfo,
     ) -> bool {
-        system_table.stdout().output_string(cstr16!("=== Comprehensive Bootloader Testing ===\r\n")).unwrap_or(());
-        
+        system_table
+            .stdout()
+            .output_string(cstr16!("=== Comprehensive Bootloader Testing ===\r\n"))
+            .unwrap_or(());
+
         let mut all_tests_passed = true;
-        
+
         // Security tests
         self.start_suite("Security Tests".to_string());
         if !self.run_security_tests(system_table, security) {
             all_tests_passed = false;
         }
         self.finish_suite();
-        
+
         // Network tests
         self.start_suite("Network Tests".to_string());
         if !self.run_network_tests(system_table, network) {
             all_tests_passed = false;
         }
         self.finish_suite();
-        
+
         // Hardware tests
         self.start_suite("Hardware Tests".to_string());
         if !self.run_hardware_tests(system_table, hardware) {
             all_tests_passed = false;
         }
         self.finish_suite();
-        
+
         // Configuration tests
         self.start_suite("Configuration Tests".to_string());
         if !self.run_configuration_tests(system_table, config) {
             all_tests_passed = false;
         }
         self.finish_suite();
-        
+
         // Cryptography tests
         self.start_suite("Cryptography Tests".to_string());
         if !self.run_cryptography_tests(system_table) {
             all_tests_passed = false;
         }
         self.finish_suite();
-        
+
         // Memory tests
         self.start_suite("Memory Tests".to_string());
         if !self.run_memory_tests(system_table) {
             all_tests_passed = false;
         }
         self.finish_suite();
-        
+
         // Multi-boot tests
         self.start_suite("Multi-Boot Tests".to_string());
         if !self.run_multiboot_tests(system_table) {
             all_tests_passed = false;
         }
         self.finish_suite();
-        
+
         // Performance tests
         self.start_suite("Performance Tests".to_string());
         if !self.run_performance_tests(system_table) {
             all_tests_passed = false;
         }
         self.finish_suite();
-        
+
         // Generate test report
         self.generate_test_report(system_table);
-        
-        system_table.stdout().output_string(cstr16!("========================================\r\n")).unwrap_or(());
-        
+
+        system_table
+            .stdout()
+            .output_string(cstr16!("========================================\r\n"))
+            .unwrap_or(());
+
         if all_tests_passed {
-            system_table.stdout().output_string(cstr16!("   [SUCCESS] All test suites passed\r\n")).unwrap_or(());
+            system_table
+                .stdout()
+                .output_string(cstr16!("   [SUCCESS] All test suites passed\r\n"))
+                .unwrap_or(());
             log_info("testing", "All comprehensive tests passed");
         } else {
-            system_table.stdout().output_string(cstr16!("   [WARNING] Some tests failed or had warnings\r\n")).unwrap_or(());
+            system_table
+                .stdout()
+                .output_string(cstr16!(
+                    "   [WARNING] Some tests failed or had warnings\r\n"
+                ))
+                .unwrap_or(());
             log_warn("testing", "Some tests failed or had warnings");
         }
-        
+
         all_tests_passed
     }
-    
+
     /// Run security subsystem tests
-    fn run_security_tests(&mut self, system_table: &mut SystemTable<Boot>, security: &SecurityContext) -> bool {
-        system_table.stdout().output_string(cstr16!("   Running security tests...\r\n")).unwrap_or(());
-        
+    fn run_security_tests(
+        &mut self,
+        system_table: &mut SystemTable<Boot>,
+        security: &SecurityContext,
+    ) -> bool {
+        system_table
+            .stdout()
+            .output_string(cstr16!("   Running security tests...\r\n"))
+            .unwrap_or(());
+
         let mut all_passed = true;
-        
+
         // Test 1: Secure Boot status validation
         let test_result = if security.secure_boot_enabled {
             TestResult::Pass
         } else {
             TestResult::Warning
         };
-        
+
         let test_id = self.get_next_test_id();
         self.add_test_result(TestCase {
             id: test_id,
@@ -276,14 +297,14 @@ impl TestingFramework {
             },
             execution_time_ms: 5,
         });
-        
+
         // Test 2: TPM availability validation
         let tpm_test_result = if security.tpm_available {
             TestResult::Pass
         } else {
             TestResult::Warning
         };
-        
+
         let test_id = self.get_next_test_id();
         self.add_test_result(TestCase {
             id: test_id,
@@ -298,14 +319,14 @@ impl TestingFramework {
             },
             execution_time_ms: 8,
         });
-        
+
         // Test 3: Platform key validation
         let pk_test_result = if security.platform_key_verified {
             TestResult::Pass
         } else {
             TestResult::Fail
         };
-        
+
         let test_id = self.get_next_test_id();
         self.add_test_result(TestCase {
             id: test_id,
@@ -320,28 +341,35 @@ impl TestingFramework {
             },
             execution_time_ms: 12,
         });
-        
+
         if pk_test_result == TestResult::Fail {
             all_passed = false;
         }
-        
+
         log_info("testing", "Security tests completed");
         all_passed
     }
-    
+
     /// Run network subsystem tests
-    fn run_network_tests(&mut self, system_table: &mut SystemTable<Boot>, network: &NetworkBootContext) -> bool {
-        system_table.stdout().output_string(cstr16!("   Running network tests...\r\n")).unwrap_or(());
-        
+    fn run_network_tests(
+        &mut self,
+        system_table: &mut SystemTable<Boot>,
+        network: &NetworkBootContext,
+    ) -> bool {
+        system_table
+            .stdout()
+            .output_string(cstr16!("   Running network tests...\r\n"))
+            .unwrap_or(());
+
         let mut all_passed = true;
-        
+
         // Test 1: Network interface availability
         let interface_test = if network.interfaces_available > 0 {
             TestResult::Pass
         } else {
             TestResult::Fail
         };
-        
+
         let test_id = self.get_next_test_id();
         self.add_test_result(TestCase {
             id: test_id,
@@ -356,14 +384,14 @@ impl TestingFramework {
             },
             execution_time_ms: 15,
         });
-        
+
         // Test 2: Network configuration
         let config_test = if network.network_configured {
             TestResult::Pass
         } else {
             TestResult::Warning
         };
-        
+
         let test_id = self.get_next_test_id();
         self.add_test_result(TestCase {
             id: test_id,
@@ -378,18 +406,22 @@ impl TestingFramework {
             },
             execution_time_ms: 20,
         });
-        
+
         // Test 3: Protocol availability
         let mut protocol_count = 0;
-        if network.pxe_available { protocol_count += 1; }
-        if network.http_client_available { protocol_count += 1; }
-        
+        if network.pxe_available {
+            protocol_count += 1;
+        }
+        if network.http_client_available {
+            protocol_count += 1;
+        }
+
         let protocol_test = if protocol_count > 0 {
             TestResult::Pass
         } else {
             TestResult::Warning
         };
-        
+
         let test_id = self.get_next_test_id();
         self.add_test_result(TestCase {
             id: test_id,
@@ -404,28 +436,35 @@ impl TestingFramework {
             },
             execution_time_ms: 10,
         });
-        
+
         if interface_test == TestResult::Fail {
             all_passed = false;
         }
-        
+
         log_info("testing", "Network tests completed");
         all_passed
     }
-    
+
     /// Run hardware subsystem tests
-    fn run_hardware_tests(&mut self, system_table: &mut SystemTable<Boot>, hardware: &HardwareInfo) -> bool {
-        system_table.stdout().output_string(cstr16!("   Running hardware tests...\r\n")).unwrap_or(());
-        
+    fn run_hardware_tests(
+        &mut self,
+        system_table: &mut SystemTable<Boot>,
+        hardware: &HardwareInfo,
+    ) -> bool {
+        system_table
+            .stdout()
+            .output_string(cstr16!("   Running hardware tests...\r\n"))
+            .unwrap_or(());
+
         let mut all_passed = true;
-        
+
         // Test 1: ACPI availability
         let acpi_test = if hardware.acpi_available {
             TestResult::Pass
         } else {
             TestResult::Warning
         };
-        
+
         let test_id = self.get_next_test_id();
         self.add_test_result(TestCase {
             id: test_id,
@@ -440,14 +479,14 @@ impl TestingFramework {
             },
             execution_time_ms: 8,
         });
-        
+
         // Test 2: Memory size validation
         let memory_test = if hardware.memory_size > 0 {
             TestResult::Pass
         } else {
             TestResult::Fail
         };
-        
+
         let test_id = self.get_next_test_id();
         self.add_test_result(TestCase {
             id: test_id,
@@ -462,15 +501,16 @@ impl TestingFramework {
             },
             execution_time_ms: 12,
         });
-        
+
         // Test 3: Device enumeration
-        let device_count = hardware.storage_devices + hardware.network_interfaces + hardware.graphics_devices;
+        let device_count =
+            hardware.storage_devices + hardware.network_interfaces + hardware.graphics_devices;
         let device_test = if device_count > 0 {
             TestResult::Pass
         } else {
             TestResult::Warning
         };
-        
+
         let test_id = self.get_next_test_id();
         self.add_test_result(TestCase {
             id: test_id,
@@ -485,20 +525,24 @@ impl TestingFramework {
             },
             execution_time_ms: 18,
         });
-        
+
         if memory_test == TestResult::Fail {
             all_passed = false;
         }
-        
+
         log_info("testing", "Hardware tests completed");
         all_passed
     }
-    
+
     /// Run configuration subsystem tests
-    fn run_configuration_tests(&mut self, _system_table: &mut SystemTable<Boot>, config: &BootloaderConfig) -> bool {
+    fn run_configuration_tests(
+        &mut self,
+        _system_table: &mut SystemTable<Boot>,
+        config: &BootloaderConfig,
+    ) -> bool {
         // Test configuration validity
         let config_test = TestResult::Pass; // Configuration loaded successfully if we're here
-        
+
         let test_id = self.get_next_test_id();
         self.add_test_result(TestCase {
             id: test_id,
@@ -509,14 +553,15 @@ impl TestingFramework {
             error_message: None,
             execution_time_ms: 5,
         });
-        
+
         // Test security policy validation
         let policy_test = match config.security_policy {
-            crate::config::SecurityPolicy::Maximum | 
-            crate::config::SecurityPolicy::Standard => TestResult::Pass,
+            crate::config::SecurityPolicy::Maximum | crate::config::SecurityPolicy::Standard => {
+                TestResult::Pass
+            }
             _ => TestResult::Warning,
         };
-        
+
         let test_id = self.get_next_test_id();
         self.add_test_result(TestCase {
             id: test_id,
@@ -531,11 +576,11 @@ impl TestingFramework {
             },
             execution_time_ms: 3,
         });
-        
+
         log_info("testing", "Configuration tests completed");
         true
     }
-    
+
     /// Run cryptography tests
     fn run_cryptography_tests(&mut self, _system_table: &mut SystemTable<Boot>) -> bool {
         // Test cryptographic self-tests
@@ -544,7 +589,7 @@ impl TestingFramework {
         } else {
             TestResult::Fail
         };
-        
+
         let test_id = self.get_next_test_id();
         self.add_test_result(TestCase {
             id: test_id,
@@ -559,20 +604,20 @@ impl TestingFramework {
             },
             execution_time_ms: 25,
         });
-        
+
         log_info("testing", "Cryptography tests completed");
         crypto_test == TestResult::Pass
     }
-    
+
     /// Run memory management tests
     fn run_memory_tests(&mut self, system_table: &mut SystemTable<Boot>) -> bool {
         let bs = system_table.boot_services();
-        
+
         // Test memory allocation
         let allocation_test = match bs.allocate_pages(
             uefi::table::boot::AllocateType::AnyPages,
             uefi::table::boot::MemoryType::LOADER_DATA,
-            1
+            1,
         ) {
             Ok(ptr) => {
                 let _ = bs.free_pages(ptr, 1);
@@ -580,7 +625,7 @@ impl TestingFramework {
             }
             Err(_) => TestResult::Fail,
         };
-        
+
         let test_id = self.get_next_test_id();
         self.add_test_result(TestCase {
             id: test_id,
@@ -595,16 +640,16 @@ impl TestingFramework {
             },
             execution_time_ms: 8,
         });
-        
+
         log_info("testing", "Memory tests completed");
         allocation_test == TestResult::Pass
     }
-    
+
     /// Run multi-boot tests
     fn run_multiboot_tests(&mut self, _system_table: &mut SystemTable<Boot>) -> bool {
         // Test multi-boot manager initialization
         let multiboot_test = TestResult::Pass; // If we got here, multi-boot system works
-        
+
         let test_id = self.get_next_test_id();
         self.add_test_result(TestCase {
             id: test_id,
@@ -615,16 +660,16 @@ impl TestingFramework {
             error_message: None,
             execution_time_ms: 15,
         });
-        
+
         log_info("testing", "Multi-boot tests completed");
         true
     }
-    
+
     /// Run performance tests
     fn run_performance_tests(&mut self, _system_table: &mut SystemTable<Boot>) -> bool {
         // Simple performance validation
         let perf_test = TestResult::Pass; // Basic performance is acceptable if we got here
-        
+
         let test_id = self.get_next_test_id();
         self.add_test_result(TestCase {
             id: test_id,
@@ -635,21 +680,24 @@ impl TestingFramework {
             error_message: None,
             execution_time_ms: 5,
         });
-        
+
         log_info("testing", "Performance tests completed");
         true
     }
-    
+
     /// Generate comprehensive test report
     fn generate_test_report(&mut self, system_table: &mut SystemTable<Boot>) {
-        system_table.stdout().output_string(cstr16!("\r\n=== Test Report Summary ===\r\n")).unwrap_or(());
-        
+        system_table
+            .stdout()
+            .output_string(cstr16!("\r\n=== Test Report Summary ===\r\n"))
+            .unwrap_or(());
+
         let mut _total_passed = 0u32;
         let mut total_failed = 0u32;
         let mut total_warnings = 0u32;
         let mut _total_skipped = 0u32;
         let mut _total_tests = 0u32;
-        
+
         for suite in &self.test_suites {
             _total_passed += suite.passed;
             total_failed += suite.failed;
@@ -657,53 +705,83 @@ impl TestingFramework {
             _total_skipped += suite.skipped;
             _total_tests += suite.total_tests();
         }
-        
+
         // Display summary statistics
-        system_table.stdout().output_string(cstr16!("Total Tests:       ")).unwrap_or(());
-        system_table.stdout().output_string(cstr16!("Multiple\r\n")).unwrap_or(()); // Would show actual number
-        
-        system_table.stdout().output_string(cstr16!("Passed:            ")).unwrap_or(());
-        system_table.stdout().output_string(cstr16!("Most\r\n")).unwrap_or(()); // Would show actual number
-        
+        system_table
+            .stdout()
+            .output_string(cstr16!("Total Tests:       "))
+            .unwrap_or(());
+        system_table
+            .stdout()
+            .output_string(cstr16!("Multiple\r\n"))
+            .unwrap_or(()); // Would show actual number
+
+        system_table
+            .stdout()
+            .output_string(cstr16!("Passed:            "))
+            .unwrap_or(());
+        system_table
+            .stdout()
+            .output_string(cstr16!("Most\r\n"))
+            .unwrap_or(()); // Would show actual number
+
         if total_failed > 0 {
-            system_table.stdout().output_string(cstr16!("Failed:            Some\r\n")).unwrap_or(());
+            system_table
+                .stdout()
+                .output_string(cstr16!("Failed:            Some\r\n"))
+                .unwrap_or(());
         }
-        
+
         if total_warnings > 0 {
-            system_table.stdout().output_string(cstr16!("Warnings:          Some\r\n")).unwrap_or(());
+            system_table
+                .stdout()
+                .output_string(cstr16!("Warnings:          Some\r\n"))
+                .unwrap_or(());
         }
-        
+
         // Overall status
         if total_failed == 0 {
-            system_table.stdout().output_string(cstr16!("Overall Status:    PASS\r\n")).unwrap_or(());
+            system_table
+                .stdout()
+                .output_string(cstr16!("Overall Status:    PASS\r\n"))
+                .unwrap_or(());
             log_info("testing", "Overall test status: PASS");
         } else {
-            system_table.stdout().output_string(cstr16!("Overall Status:    FAIL\r\n")).unwrap_or(());
+            system_table
+                .stdout()
+                .output_string(cstr16!("Overall Status:    FAIL\r\n"))
+                .unwrap_or(());
             log_error("testing", "Overall test status: FAIL");
         }
-        
-        system_table.stdout().output_string(cstr16!("===========================\r\n")).unwrap_or(());
+
+        system_table
+            .stdout()
+            .output_string(cstr16!("===========================\r\n"))
+            .unwrap_or(());
     }
-    
+
     /// Get next test ID
     fn get_next_test_id(&mut self) -> u32 {
         self.test_counter += 1;
         self.test_counter
     }
-    
+
     /// Quick health check
     pub fn quick_health_check(&mut self, system_table: &mut SystemTable<Boot>) -> bool {
-        system_table.stdout().output_string(cstr16!("=== Quick Health Check ===\r\n")).unwrap_or(());
-        
+        system_table
+            .stdout()
+            .output_string(cstr16!("=== Quick Health Check ===\r\n"))
+            .unwrap_or(());
+
         // Basic functionality test
         let basic_test = TestResult::Pass;
-        
+
         // Memory test
         let bs = system_table.boot_services();
         let memory_test = match bs.allocate_pages(
             uefi::table::boot::AllocateType::AnyPages,
             uefi::table::boot::MemoryType::LOADER_DATA,
-            1
+            1,
         ) {
             Ok(ptr) => {
                 let _ = bs.free_pages(ptr, 1);
@@ -711,19 +789,28 @@ impl TestingFramework {
             }
             Err(_) => TestResult::Fail,
         };
-        
+
         let health_ok = basic_test == TestResult::Pass && memory_test == TestResult::Pass;
-        
+
         if health_ok {
-            system_table.stdout().output_string(cstr16!("   [SUCCESS] Health check passed\r\n")).unwrap_or(());
+            system_table
+                .stdout()
+                .output_string(cstr16!("   [SUCCESS] Health check passed\r\n"))
+                .unwrap_or(());
             log_info("testing", "Quick health check passed");
         } else {
-            system_table.stdout().output_string(cstr16!("   [ERROR] Health check failed\r\n")).unwrap_or(());
+            system_table
+                .stdout()
+                .output_string(cstr16!("   [ERROR] Health check failed\r\n"))
+                .unwrap_or(());
             log_error("testing", "Quick health check failed");
         }
-        
-        system_table.stdout().output_string(cstr16!("===========================\r\n")).unwrap_or(());
-        
+
+        system_table
+            .stdout()
+            .output_string(cstr16!("===========================\r\n"))
+            .unwrap_or(());
+
         health_ok
     }
 }

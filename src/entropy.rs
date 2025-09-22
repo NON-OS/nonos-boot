@@ -1,7 +1,7 @@
 //! NØNOS Preboot Entropy Generator — Hardened Capsule Seeder
 //! eK@nonos-tech.xyz
 //!
-//! - EFI RNG 
+//! - EFI RNG
 //! - RDSEED/RDRAND
 //! - TSC jitter with lfence serialization
 //! - RTC time salt
@@ -9,10 +9,10 @@
 
 #![allow(dead_code)]
 
+use crate::handoff::ZeroStateBootInfo;
 use core::mem::MaybeUninit;
 use uefi::table::boot::BootServices;
 use uefi_services::system_table;
-use crate::handoff::ZeroStateBootInfo;
 
 use blake3; // add in Cargo.toml
 
@@ -23,9 +23,9 @@ pub extern "C" fn getrandom(buf: *mut u8, len: usize, _flags: u32) -> isize {
     if buf.is_null() || len == 0 {
         return -1;
     }
-    
+
     let slice = unsafe { core::slice::from_raw_parts_mut(buf, len) };
-    
+
     // Use our advanced entropy collection system
     let st = unsafe { system_table().as_ref() };
     let bt = st.boot_services();
@@ -34,12 +34,12 @@ pub extern "C" fn getrandom(buf: *mut u8, len: usize, _flags: u32) -> isize {
     let mut hasher = blake3::Hasher::new();
     hasher.update(&entropy_pool);
     hasher.finalize_xof().fill(slice);
-    
+
     len as isize
 }
 // If you can, depend on uefi::proto::rng
 #[cfg(feature = "efi-rng")]
-use uefi::proto::rng::{Rng, Algorithm};
+use uefi::proto::rng::{Algorithm, Rng};
 
 /// Domain separation labels
 const DS_ENTROPY_ACCUM: &str = "NONOS:BOOT:ENTROPY:ACCUM";
@@ -77,7 +77,7 @@ pub fn get_rtc_timestamp() -> [u8; 8] {
 pub fn collect_boot_entropy(bs: &BootServices) -> [u8; 64] {
     let mut h = blake3::Hasher::new_derive_key(DS_ENTROPY_ACCUM);
 
-    // 1) EFI RNG 
+    // 1) EFI RNG
     #[cfg(feature = "efi-rng")]
     if let Ok(handle) = bs.locate_protocol::<Rng>() {
         // SAFETY: UEFI protocol obtained from BootServices
@@ -92,7 +92,7 @@ pub fn collect_boot_entropy(bs: &BootServices) -> [u8; 64] {
         // let _ = rng.get_rng(Some(&Algorithm::X9423Des), &mut buf);
     }
 
-    // 2) RDSEED / RDRAND 
+    // 2) RDSEED / RDRAND
     let mut hw = [0u8; 64];
     let mut off = 0usize;
 
@@ -134,13 +134,19 @@ pub fn collect_boot_entropy(bs: &BootServices) -> [u8; 64] {
     if let Ok(rtc) = st.runtime_services().get_time() {
         let mut rtc_buf = [0u8; 16];
         rtc_buf[0..4].copy_from_slice(&(rtc.year() as u32).to_le_bytes());
-        rtc_buf[4] = rtc.month(); rtc_buf[5] = rtc.day(); rtc_buf[6] = rtc.hour();
-        rtc_buf[7] = rtc.minute(); rtc_buf[8] = rtc.second();
+        rtc_buf[4] = rtc.month();
+        rtc_buf[5] = rtc.day();
+        rtc_buf[6] = rtc.hour();
+        rtc_buf[7] = rtc.minute();
+        rtc_buf[8] = rtc.second();
         rtc_buf[9..13].copy_from_slice(&(rtc.nanosecond() as u32).to_le_bytes());
-        rtc_buf[13] = match rtc.time_zone() { Some(tz) => tz as u8, None => 0 };
-        rtc_buf[14] = match rtc.daylight() { 
+        rtc_buf[13] = match rtc.time_zone() {
+            Some(tz) => tz as u8,
+            None => 0,
+        };
+        rtc_buf[14] = match rtc.daylight() {
             uefi::table::runtime::Daylight::ADJUST_DAYLIGHT => 1,
-            _ => 0 
+            _ => 0,
         };
         rtc_buf[15] = 0;
         h.update(&rtc_buf);
@@ -176,13 +182,18 @@ pub fn seed_entropy(info: &mut ZeroStateBootInfo, bs: &BootServices) {
 
 #[inline(always)]
 fn scrub(b: &mut [u8]) {
-    for x in b { core::sync::atomic::compiler_fence(core::sync::atomic::Ordering::SeqCst); *x = 0; }
+    for x in b {
+        core::sync::atomic::compiler_fence(core::sync::atomic::Ordering::SeqCst);
+        *x = 0;
+    }
 }
 
 #[inline(always)]
 fn is_weak_entropy(buf: &[u8; 64]) -> bool {
     let all_zero = buf.iter().all(|&b| b == 0);
-    if all_zero { return true; }
+    if all_zero {
+        return true;
+    }
     // crude repetition check
     let half = &buf[0..32];
     half == &buf[32..64]
@@ -208,10 +219,16 @@ fn rdseed64() -> Option<u64> {
     unsafe {
         let mut x: u64 = 0;
         let ok = core::arch::x86_64::_rdseed64_step(&mut x);
-        if ok == 1 { Some(x) } else { None }
+        if ok == 1 {
+            Some(x)
+        } else {
+            None
+        }
     }
     #[cfg(not(any(target_arch = "x86_64")))]
-    { None }
+    {
+        None
+    }
 }
 
 /// Try RDRAND (returns Some(u64) on success)
@@ -228,8 +245,14 @@ fn rdrand64() -> Option<u64> {
             ok = out(reg_byte) ok,
             options(nostack, nomem)
         );
-        if ok != 0 { Some(x) } else { None }
+        if ok != 0 {
+            Some(x)
+        } else {
+            None
+        }
     }
     #[cfg(not(any(target_arch = "x86_64")))]
-    { None }
+    {
+        None
+    }
 }

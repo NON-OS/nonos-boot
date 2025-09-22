@@ -10,7 +10,7 @@
 
 #![allow(dead_code)]
 
-use alloc::{vec::Vec, vec};
+use alloc::{vec, vec::Vec};
 
 use blake3;
 use core::cmp::min;
@@ -40,15 +40,17 @@ pub enum ZkVerifyResult {
 /* -------------------- constants & helpers -------------------- */
 
 const DS_PROGRAM_HASH: &str = "NONOS:ZK:PROGRAM:v1";
-const DS_COMMITMENT:   &str = "NONOS:CAPSULE:COMMITMENT:v1";
+const DS_COMMITMENT: &str = "NONOS:CAPSULE:COMMITMENT:v1";
 
 const MAX_PROOF_SIZE: usize = 2 * 1024 * 1024; // 2 MiB cap
-const MAX_INPUT_SIZE: usize = 256 * 1024;      // 256 KiB cap
+const MAX_INPUT_SIZE: usize = 256 * 1024; // 256 KiB cap
 
 #[inline]
-fn ct_eq32(a: &[u8;32], b: &[u8;32]) -> bool {
+fn ct_eq32(a: &[u8; 32], b: &[u8; 32]) -> bool {
     let mut x = 0u8;
-    for i in 0..32 { x |= a[i] ^ b[i]; }
+    for i in 0..32 {
+        x |= a[i] ^ b[i];
+    }
     x == 0
 }
 
@@ -102,9 +104,12 @@ pub fn verify_proof(proof: &ZkProof) -> ZkVerifyResult {
     #[cfg(feature = "mock-proof")]
     {
         const MAGIC: &[u8] = &[0xAA, 0xBB, 0xCC, 0xDD];
-        let ok = proof.proof_blob.len() >= MAGIC.len()
-            && &proof.proof_blob[..MAGIC.len()] == MAGIC;
-        return if ok { ZkVerifyResult::Valid } else { ZkVerifyResult::Invalid("mock verifier: bad prefix") };
+        let ok = proof.proof_blob.len() >= MAGIC.len() && &proof.proof_blob[..MAGIC.len()] == MAGIC;
+        return if ok {
+            ZkVerifyResult::Valid
+        } else {
+            ZkVerifyResult::Invalid("mock verifier: bad prefix")
+        };
     }
 
     #[cfg(not(feature = "mock-proof"))]

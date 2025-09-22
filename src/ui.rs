@@ -8,10 +8,10 @@
 
 #![allow(dead_code)]
 
+use core::fmt::Write;
 use uefi::prelude::*;
 use uefi::proto::console::text::Color;
-use uefi::{CStr16, cstr16};
-use core::fmt::Write;
+use uefi::{cstr16, CStr16};
 
 /// Boot UI with a borrowed console handle (no unsafe global loads).
 pub struct Ui<'a> {
@@ -47,17 +47,22 @@ impl Default for Theme {
 impl<'a> Ui<'a> {
     /// Acquire UI from a system table safely.
     pub fn new(st: &'a mut SystemTable<uefi::table::Boot>) -> Self {
-        Ui { system_table: st, theme: Theme::default() }
+        Ui {
+            system_table: st,
+            theme: Theme::default(),
+        }
     }
 
     /// Replace color theme.
-    pub fn set_theme(&mut self, t: Theme) { self.theme = t; }
+    pub fn set_theme(&mut self, t: Theme) {
+        self.theme = t;
+    }
 
     /// Clear screen and draw a banner.
     pub fn banner(&mut self) -> Result<(), Status> {
         self.color(self.theme.title, self.theme.bg)?;
         match self.system_table.stdout().clear() {
-            Ok(()) => {},
+            Ok(()) => {}
             Err(_) => return Err(Status::DEVICE_ERROR),
         }
         self.line("")?;
@@ -110,7 +115,8 @@ impl<'a> Ui<'a> {
         self.line("")?;
         self.raw("──────────────────── SYSTEM FAULT DETECTED ────────────────────")?;
         self.line("")?;
-        self.raw("[!] ")?; self.line(msg)?;
+        self.raw("[!] ")?;
+        self.line(msg)?;
         self.raw("───────────────────────────────────────────────────────────────")?;
         self.line("")?;
         self.color(self.theme.text, self.theme.bg)
@@ -122,7 +128,9 @@ impl<'a> Ui<'a> {
         let width = 32usize;
         let filled = ((current.min(total) * width) / total).min(width);
         let mut bar = [b' '; 32];
-        for i in 0..filled { bar[i] = b'='; }
+        for i in 0..filled {
+            bar[i] = b'=';
+        }
         self.color(self.theme.info, self.theme.bg)?;
         self.raw("[")?;
         self.raw(core::str::from_utf8(&bar).unwrap_or("                                "))?;
@@ -188,7 +196,9 @@ impl<'a> Ui<'a> {
 
     fn rule(&mut self, n: usize) -> Result<(), Status> {
         const DASH: &str = "─";
-        for _ in 0..n { self.raw(DASH)?; }
+        for _ in 0..n {
+            self.raw(DASH)?;
+        }
         self.line("")
     }
 }

@@ -24,9 +24,9 @@
 
 #![allow(dead_code)]
 
-use core::{mem, ptr};
-use core::convert::TryInto;
 use alloc::vec::Vec;
+use core::convert::TryInto;
+use core::{mem, ptr};
 
 use blake3;
 use sha2::{Digest, Sha256}; // optional helper for interop
@@ -37,7 +37,7 @@ pub const CAPSULE_VERSION: u16 = 1;
 
 /// Flags
 pub const FLAG_ZK_REQUIRED: u8 = 1 << 0;
-pub const FLAG_ENCRYPTED:  u8 = 1 << 1;
+pub const FLAG_ENCRYPTED: u8 = 1 << 1;
 
 /// Capsule classification types
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -52,16 +52,16 @@ pub enum CapsuleType {
 #[repr(C, packed)]
 #[derive(Clone, Copy, Debug)]
 pub struct CapsuleMeta {
-    pub magic: [u8; 4],        // "N0N\0"
-    pub version: u16,          // == CAPSULE_VERSION
-    pub capsule_type: u8,      // 0 boot, 1 kernel, 2 module
-    pub flags: u8,             // ZK_REQUIRED, ENCRYPTED
-    pub payload_len: u32,      // bytes before signature
+    pub magic: [u8; 4],   // "N0N\0"
+    pub version: u16,     // == CAPSULE_VERSION
+    pub capsule_type: u8, // 0 boot, 1 kernel, 2 module
+    pub flags: u8,        // ZK_REQUIRED, ENCRYPTED
+    pub payload_len: u32, // bytes before signature
     pub zk_commit_hash: [u8; 32],
-    pub sig_offset: u32,       // absolute offset to signature/proof
-    pub sig_len: u16,          // signature/proof length
-    pub entropy: [u8; 16],     // optional salt
-    pub reserved: [u8; 4],     // future use
+    pub sig_offset: u32,   // absolute offset to signature/proof
+    pub sig_len: u16,      // signature/proof length
+    pub entropy: [u8; 16], // optional salt
+    pub reserved: [u8; 4], // future use
 }
 
 /// Parse header and run fast sanity (magic/version only). Layout validation is separate.
@@ -95,10 +95,14 @@ pub fn validate_capsule_layout(blob: &[u8], meta: &CapsuleMeta) -> Result<(), &'
 
     // Compute ends with overflow checks
     let payload_end = sig_start;
-    if payload_end > blob_len { return Err("payload end oob"); }
+    if payload_end > blob_len {
+        return Err("payload end oob");
+    }
 
     let sig_end = sig_start.checked_add(sig_len).ok_or("sig len overflow")?;
-    if sig_end > blob_len { return Err("signature end oob"); }
+    if sig_end > blob_len {
+        return Err("signature end oob");
+    }
 
     // The declared payload_len should match actual span (hdr..sig_start)
     let declared_payload_len = meta.payload_len as usize;
@@ -117,7 +121,10 @@ pub fn validate_capsule_layout(blob: &[u8], meta: &CapsuleMeta) -> Result<(), &'
 
 /// Extract detached signature/proof and payload according to validated metadata.
 /// Caller MUST have run `validate_capsule_layout` first (this fn rechecks bounds defensively).
-pub fn extract_signature_and_payload(blob: &[u8], meta: &CapsuleMeta) -> Result<(Vec<u8>, Vec<u8>), &'static str> {
+pub fn extract_signature_and_payload(
+    blob: &[u8],
+    meta: &CapsuleMeta,
+) -> Result<(Vec<u8>, Vec<u8>), &'static str> {
     validate_capsule_layout(blob, meta)?;
 
     let hdr = mem::size_of::<CapsuleMeta>();
@@ -180,11 +187,11 @@ mod tests {
             capsule_type: 1,
             flags: 0,
             payload_len: 8 + hdr_len as u32,
-            zk_commit_hash: [0u8;32],
+            zk_commit_hash: [0u8; 32],
             sig_offset: (hdr_len + 8) as u32,
             sig_len: 4,
-            entropy: [0u8;16],
-            reserved: [0u8;4],
+            entropy: [0u8; 16],
+            reserved: [0u8; 4],
         };
         // write header unaligned
         unsafe {
@@ -206,13 +213,15 @@ mod tests {
             capsule_type: 1,
             flags: 0,
             payload_len: 8 + hdr_len as u32,
-            zk_commit_hash: [0u8;32],
+            zk_commit_hash: [0u8; 32],
             sig_offset: (hdr_len + 8 + 1) as u32, // 1 byte inside sig, will oob
             sig_len: 4,
-            entropy: [0u8;16],
-            reserved: [0u8;4],
+            entropy: [0u8; 16],
+            reserved: [0u8; 4],
         };
-        unsafe { ptr::write_unaligned(blob.as_mut_ptr() as *mut CapsuleMeta, meta); }
+        unsafe {
+            ptr::write_unaligned(blob.as_mut_ptr() as *mut CapsuleMeta, meta);
+        }
         assert!(validate_capsule_layout(&blob, &meta).is_err());
     }
 }

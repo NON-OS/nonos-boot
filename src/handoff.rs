@@ -39,18 +39,18 @@ pub const ZS_HDR_SIZE: u16 = 128;
 #[repr(C, packed)]
 #[derive(Debug, Clone, Copy)]
 pub struct ZeroStateBootInfo {
-    pub magic: u64,            // must == ZS_MAGIC
-    pub abi_version: u16,      // must == ZS_ABI_VERSION
-    pub hdr_size: u16,         // must == 128
-    pub boot_flags: u32,       // BootModeFlags
-    pub capsule_base: u64,     // physical base address of .mod blob
-    pub capsule_size: u64,     // size in bytes
-    pub capsule_hash: [u8; 32],// BLAKE3/SHA-256 commitment of payload
-    pub memory_start: u64,     // first usable RAM (post-firmware)
-    pub memory_size: u64,      // total RAM bytes
-    pub entropy: [u8; 32],     // seed (truncate collector to 32 here)
-    pub rtc_utc: [u8; 8],      // optional RTC snapshot (format up to you)
-    pub reserved: [u8; 8],     // future fields (keep zero)
+    pub magic: u64,             // must == ZS_MAGIC
+    pub abi_version: u16,       // must == ZS_ABI_VERSION
+    pub hdr_size: u16,          // must == 128
+    pub boot_flags: u32,        // BootModeFlags
+    pub capsule_base: u64,      // physical base address of .mod blob
+    pub capsule_size: u64,      // size in bytes
+    pub capsule_hash: [u8; 32], // BLAKE3/SHA-256 commitment of payload
+    pub memory_start: u64,      // first usable RAM (post-firmware)
+    pub memory_size: u64,       // total RAM bytes
+    pub entropy: [u8; 32],      // seed (truncate collector to 32 here)
+    pub rtc_utc: [u8; 8],       // optional RTC snapshot (format up to you)
+    pub reserved: [u8; 8],      // future fields (keep zero)
 }
 
 // Compile-time guard: assert exact size = 128
@@ -97,10 +97,10 @@ impl ZeroStateBootInfo {
 #[repr(C)]
 pub struct BootModeFlags;
 impl BootModeFlags {
-    pub const DEBUG:       u32 = 1 << 0;
-    pub const RECOVERY:    u32 = 1 << 1;
-    pub const FALLBACK:    u32 = 1 << 2;
-    pub const COLD_START:  u32 = 1 << 3;
+    pub const DEBUG: u32 = 1 << 0;
+    pub const RECOVERY: u32 = 1 << 1;
+    pub const FALLBACK: u32 = 1 << 2;
+    pub const COLD_START: u32 = 1 << 3;
     pub const SECURE_BOOT: u32 = 1 << 4;
     pub const ZK_ATTESTED: u32 = 1 << 5;
 }
@@ -135,7 +135,10 @@ pub fn build_bootinfo(
 
 impl ZeroStateBootInfo {
     /// Kernel helper: return (base, len) of capsule; safe to map/check.
-    #[inline] pub fn capsule_span(&self) -> (u64, u64) { (self.capsule_base, self.capsule_size) }
+    #[inline]
+    pub fn capsule_span(&self) -> (u64, u64) {
+        (self.capsule_base, self.capsule_size)
+    }
 
     /// Kernel helper: true if header is sane and fields look non-zero-ish.
     #[inline]
