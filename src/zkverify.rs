@@ -13,7 +13,6 @@
 use alloc::{vec, vec::Vec};
 
 use blake3;
-use core::cmp::min;
 
 /// Abstract proof type for any zk backend (SNARK, STARK, zkVM)
 #[derive(Debug, Clone)]
