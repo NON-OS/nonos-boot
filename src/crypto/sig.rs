@@ -95,7 +95,7 @@ impl SignatureVerifier {
                 return SignatureStatus::MalformedSignature;
             }
         };
-        
+
         #[cfg(not(target_os = "uefi"))]
         let public_key = match VerifyingKey::from_bytes(public_key) {
             Ok(key) => key,
@@ -114,7 +114,7 @@ impl SignatureVerifier {
                 return SignatureStatus::MalformedSignature;
             }
         };
-        
+
         #[cfg(not(target_os = "uefi"))]
         let signature = Signature::from_bytes(signature);
 
