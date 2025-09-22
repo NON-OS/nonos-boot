@@ -1,0 +1,13 @@
+/home/nonos/Downloads/N0N-OS-main/boot/target/x86_64-unknown-uefi/debug/deps/bootloader_api-9dd36fca182ca793.d: /home/nonos/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bootloader_api-0.11.12/src/lib.rs /home/nonos/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bootloader_api-0.11.12/src/config.rs /home/nonos/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bootloader_api-0.11.12/src/info.rs /home/nonos/Downloads/N0N-OS-main/boot/target/x86_64-unknown-uefi/debug/build/bootloader_api-6a5da9ecb90a5c05/out/concat.rs /home/nonos/Downloads/N0N-OS-main/boot/target/x86_64-unknown-uefi/debug/build/bootloader_api-6a5da9ecb90a5c05/out/version_info.rs
+
+/home/nonos/Downloads/N0N-OS-main/boot/target/x86_64-unknown-uefi/debug/deps/libbootloader_api-9dd36fca182ca793.rlib: /home/nonos/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bootloader_api-0.11.12/src/lib.rs /home/nonos/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bootloader_api-0.11.12/src/config.rs /home/nonos/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bootloader_api-0.11.12/src/info.rs /home/nonos/Downloads/N0N-OS-main/boot/target/x86_64-unknown-uefi/debug/build/bootloader_api-6a5da9ecb90a5c05/out/concat.rs /home/nonos/Downloads/N0N-OS-main/boot/target/x86_64-unknown-uefi/debug/build/bootloader_api-6a5da9ecb90a5c05/out/version_info.rs
+
+/home/nonos/Downloads/N0N-OS-main/boot/target/x86_64-unknown-uefi/debug/deps/libbootloader_api-9dd36fca182ca793.rmeta: /home/nonos/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bootloader_api-0.11.12/src/lib.rs /home/nonos/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bootloader_api-0.11.12/src/config.rs /home/nonos/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bootloader_api-0.11.12/src/info.rs /home/nonos/Downloads/N0N-OS-main/boot/target/x86_64-unknown-uefi/debug/build/bootloader_api-6a5da9ecb90a5c05/out/concat.rs /home/nonos/Downloads/N0N-OS-main/boot/target/x86_64-unknown-uefi/debug/build/bootloader_api-6a5da9ecb90a5c05/out/version_info.rs
+
+/home/nonos/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bootloader_api-0.11.12/src/lib.rs:
+/home/nonos/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bootloader_api-0.11.12/src/config.rs:
+/home/nonos/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bootloader_api-0.11.12/src/info.rs:
+/home/nonos/Downloads/N0N-OS-main/boot/target/x86_64-unknown-uefi/debug/build/bootloader_api-6a5da9ecb90a5c05/out/concat.rs:
+/home/nonos/Downloads/N0N-OS-main/boot/target/x86_64-unknown-uefi/debug/build/bootloader_api-6a5da9ecb90a5c05/out/version_info.rs:
+
+# env-dep:OUT_DIR=/home/nonos/Downloads/N0N-OS-main/boot/target/x86_64-unknown-uefi/debug/build/bootloader_api-6a5da9ecb90a5c05/out

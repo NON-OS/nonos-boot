@@ -1,0 +1,23 @@
+[build]
+target = "x86_64-unknown-uefi"
+
+[target.x86_64-unknown-uefi]
+runner = "echo 'UEFI binary built:'"
+
+rustflags = [
+    "-C", "panic=abort",
+    "-C", "target-feature=+crt-static",
+    "-C", "link-args=--gc-sections",
+]
+
+[unstable]
+build-std-features = ["compiler-builtins-mem"]
+build-std = ["core", "compiler_builtins", "alloc"]
+
+[env]
+NONOS_BOOT_TARGET = "x86_64-unknown-uefi"
+NONOS_BOOT_MODE = "uefi"
+BLAKE3_NO_SSE2 = "1"
+BLAKE3_NO_SSE41 = "1"
+BLAKE3_NO_AVX2 = "1"
+BLAKE3_NO_AVX512 = "1"
