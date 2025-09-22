@@ -83,7 +83,7 @@ fn efi_main(_handle: Handle, mut system_table: SystemTable<Boot>) -> Status {
         Ok(_) => {
             log_debug("boot", "UEFI services initialized successfully");
         }
-        Err(e) => {
+        Err(_e) => {
             log_error("boot", "Failed to initialize UEFI services");
             fatal_reset(&mut system_table, "UEFI service initialization failed");
         }
@@ -187,26 +187,25 @@ fn efi_main(_handle: Handle, mut system_table: SystemTable<Boot>) -> Status {
     );
 
     // Phase 3.7: Testing Framework (if diagnostic mode enabled)
-    let mut testing_passed = true;
-    if bootloader_config.diagnostic_output {
+    let testing_passed = if bootloader_config.diagnostic_output {
         system_table
             .stdout()
             .output_string(cstr16!("Phase 3.7: Comprehensive Testing\r\n"))
             .unwrap_or(());
 
         let mut testing_framework = TestingFramework::new();
-        testing_passed = testing_framework.run_comprehensive_tests(
+        testing_framework.run_comprehensive_tests(
             &mut system_table,
             &bootloader_config,
             &security_context,
             &network_context,
             &hardware_info,
-        );
+        )
     } else {
         // Run quick health check even if not in diagnostic mode
         let mut testing_framework = TestingFramework::new();
-        testing_passed = testing_framework.quick_health_check(&mut system_table);
-    }
+        testing_framework.quick_health_check(&mut system_table)
+    };
 
     // Phase 4: Graphics and Memory
     system_table
@@ -223,7 +222,7 @@ fn efi_main(_handle: Handle, mut system_table: SystemTable<Boot>) -> Status {
         .unwrap_or(());
 
     // Initialize multi-boot manager
-    let mut multiboot_manager = MultiBootManager::new(&mut system_table);
+    let multiboot_manager = MultiBootManager::new(&mut system_table);
 
     // Display multi-boot menu
     let selected_boot_entry =
@@ -754,7 +753,7 @@ fn setup_memory_management(system_table: &mut SystemTable<Boot>) {
     if let Ok(buffer_ptr) = bs.allocate_pages(
         uefi::table::boot::AllocateType::AnyPages,
         uefi::table::boot::MemoryType::LOADER_DATA,
-        (buffer_size + 4095) / 4096,
+        buffer_size.div_ceil(4096),
     ) {
         let buffer = unsafe { core::slice::from_raw_parts_mut(buffer_ptr as *mut u8, buffer_size) };
 
@@ -774,7 +773,7 @@ fn setup_memory_management(system_table: &mut SystemTable<Boot>) {
         }
 
         // Clean up allocated buffer
-        let _ = bs.free_pages(buffer_ptr, (buffer_size + 4095) / 4096);
+        let _ = bs.free_pages(buffer_ptr, buffer_size.div_ceil(4096));
         system_table
             .stdout()
             .output_string(cstr16!("   [SUCCESS] Memory analysis complete\r\n"))
@@ -789,6 +788,7 @@ fn setup_memory_management(system_table: &mut SystemTable<Boot>) {
 }
 
 /// Discover available hardware components
+#[allow(dead_code)]
 fn discover_hardware(system_table: &mut SystemTable<Boot>) {
     system_table
         .stdout()
@@ -798,18 +798,18 @@ fn discover_hardware(system_table: &mut SystemTable<Boot>) {
     let bs = system_table.boot_services();
 
     // Check for various protocols to discover hardware
-    let mut devices_found = 0;
+    let mut _devices_found = 0;
 
     // Check for PCI Root Bridge Protocol
-    if let Ok(_) = bs.find_handles::<uefi::proto::device_path::DevicePath>() {
-        devices_found += 1;
+    if bs.find_handles::<uefi::proto::device_path::DevicePath>().is_ok() {
+        _devices_found += 1;
     }
 
     // Check for Block IO devices (storage)
     let storage_found = if let Ok(handles) = bs.find_handles::<uefi::proto::media::block::BlockIO>()
     {
         if !handles.is_empty() {
-            devices_found += handles.len();
+            _devices_found += handles.len();
             true
         } else {
             false
@@ -821,7 +821,7 @@ fn discover_hardware(system_table: &mut SystemTable<Boot>) {
     // Check for Simple Network Protocol (networking)
     let network_found = if let Ok(handles) = bs.find_handles::<SimpleNetwork>() {
         if !handles.is_empty() {
-            devices_found += handles.len();
+            _devices_found += handles.len();
             true
         } else {
             false
@@ -834,7 +834,7 @@ fn discover_hardware(system_table: &mut SystemTable<Boot>) {
     let filesystem_found =
         if let Ok(handles) = bs.find_handles::<uefi::proto::media::fs::SimpleFileSystem>() {
             if !handles.is_empty() {
-                devices_found += handles.len();
+                _devices_found += handles.len();
                 true
             } else {
                 false
@@ -844,7 +844,7 @@ fn discover_hardware(system_table: &mut SystemTable<Boot>) {
         };
 
     // Drop bs to release the immutable borrow
-    drop(bs);
+    let _ = bs;
 
     // Now we can use system_table mutably for output
     if storage_found {
@@ -874,6 +874,7 @@ fn discover_hardware(system_table: &mut SystemTable<Boot>) {
 }
 
 /// Non-returning hard reset for boot failures
+#[allow(unreachable_code)]
 fn fatal_reset(st: &mut SystemTable<Boot>, reason: &str) -> ! {
     log_warn("fatal", reason);
     let _ = st.stdout().reset(false);
@@ -884,5 +885,6 @@ fn fatal_reset(st: &mut SystemTable<Boot>, reason: &str) -> ! {
     st.runtime_services()
         .reset(ResetType::WARM, Status::LOAD_ERROR, Some(reason.as_bytes()));
 
-    loop {} // should never reach
+    // If reset fails, panic to halt the system
+    panic!("System reset failed - halting")
 }
