@@ -23,7 +23,7 @@ use uefi::prelude::*;
 use uefi::proto::media::file::{File, FileAttribute, FileMode, FileType};
 use uefi::proto::media::fs::SimpleFileSystem;
 use uefi::table::boot::{AllocateType, MemoryType};
-use uefi::{cstr16, CStr16};
+use uefi::CStr16;
 
 // use crate::capsule::Capsule; // Disabled for direct ELF loading
 use xmas_elf::ElfFile;
@@ -122,8 +122,8 @@ pub fn load_kernel_capsule(st: &mut SystemTable<Boot>) -> Result<KernelCapsule, 
     log_info("loader", "ELF entry point extracted");
 
     // Process program headers and load segments to their correct physical addresses
-    let mut kernel_base = 0usize;
-    let mut kernel_size = 0usize;
+    let mut _kernel_base = 0usize;
+    let mut _kernel_size = 0usize;
 
     // Find the lowest and highest addresses from loadable segments
     let mut min_addr = usize::MAX;
@@ -140,8 +140,8 @@ pub fn load_kernel_capsule(st: &mut SystemTable<Boot>) -> Result<KernelCapsule, 
     }
 
     if min_addr != usize::MAX && max_addr > min_addr {
-        kernel_base = min_addr;
-        kernel_size = max_addr - min_addr;
+        _kernel_base = min_addr;
+        _kernel_size = max_addr - min_addr;
 
         log_info("loader", "Kernel memory layout determined");
     } else {
@@ -230,6 +230,7 @@ pub fn load_kernel_capsule(st: &mut SystemTable<Boot>) -> Result<KernelCapsule, 
     })
 }
 
+#[allow(dead_code)]
 #[inline]
 fn zero_buf(buf: &mut [u8]) {
     for b in buf.iter_mut() {
