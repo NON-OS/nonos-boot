@@ -1,25 +1,21 @@
-//! Advanced Cryptographic Signature Verification for NONOS Capsules
-//! eK@nonos-tech.xyz
+//! Signature Verification for NONOS Capsules
+//! eK@nonos.systems
 //!
-//! Enhanced cryptographic verification system with:
-//! - Full Ed25519 signature verification
-//! - RSA signature support for UEFI compatibility
-//! - Certificate chain validation
-//! - Hardware security module integration
-//! - Advanced threat detection
+//! - Full Ed25519 signature verification (trusted keyring)
+//! - Extensible verifier context & self-test hooks
 
 #![allow(dead_code)]
 
-use crate::log::logger::{log_debug, log_error, log_info, log_warn};
-use crate::verify::CapsuleMetadata;
+extern crate alloc;
+
 use alloc::vec::Vec;
 use blake3;
-#[cfg(target_os = "uefi")]
 use ed25519_dalek::{PublicKey, Signature, Verifier};
-#[cfg(not(target_os = "uefi"))]
-use ed25519_dalek::{Signature, Verifier, VerifyingKey};
+use crate::capsule::zkmeta::{CapsuleMeta, validate_capsule_layout, extract_signature_and_payload};
+use crate::log::logger::{log_info, log_warn, log_error, log_debug};
+use crate::verify::verify_ed25519_signature;
 
-/// Certificate validation result
+/// Certificate validation result (placeholder for future X.509 chain, CRL, etc.)
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum CertificateStatus {
     Valid,
@@ -30,7 +26,7 @@ pub enum CertificateStatus {
     MalformedCertificate,
 }
 
-/// Signature verification result
+/// Signature verification result for the standalone verifier context
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum SignatureStatus {
     Valid,
@@ -40,8 +36,8 @@ pub enum SignatureStatus {
     MalformedSignature,
 }
 
-/// Advanced signature verification context
-#[derive(Debug, Default)]
+/// Advanced signature verification context (extensible; used in self-test)
+#[derive(Debug)]
 pub struct SignatureVerifier {
     pub trusted_ed25519_keys: Vec<[u8; 32]>,
     pub trusted_rsa_keys: Vec<Vec<u8>>,
@@ -49,15 +45,23 @@ pub struct SignatureVerifier {
     pub revocation_list: Vec<[u8; 32]>,
 }
 
+impl Default for SignatureVerifier {
+    fn default() -> Self {
+        Self {
+            trusted_ed25519_keys: Vec::new(),
+            trusted_rsa_keys: Vec::new(),
+            certificate_store: Vec::new(),
+            revocation_list: Vec::new(),
+        }
+    }
+}
+
 impl SignatureVerifier {
-    /// Create new signature verifier with embedded public keys
+    /// Create new signature verifier with embedded public keys (example)
     pub fn new() -> Self {
         let mut verifier = Self::default();
-
-        // Add embedded trusted public keys for NØNOS
         verifier.add_trusted_ed25519_key(&NONOS_SIGNING_KEY);
         verifier.add_trusted_ed25519_key(&NONOS_BACKUP_KEY);
-
         log_info("crypto", "Advanced signature verifier initialized");
         verifier
     }
@@ -70,24 +74,18 @@ impl SignatureVerifier {
         }
     }
 
-    /// Verify Ed25519 signature with enhanced security
+    /// Verify Ed25519 signature with explicit key (not used in the pipeline path)
     pub fn verify_ed25519_signature(
         &self,
         data: &[u8],
         signature: &[u8; 64],
         public_key: &[u8; 32],
     ) -> SignatureStatus {
-        // Check if the public key is trusted
         if !self.trusted_ed25519_keys.contains(public_key) {
-            log_warn(
-                "crypto",
-                "Attempted verification with untrusted Ed25519 key",
-            );
+            log_warn("crypto", "Attempted verification with untrusted Ed25519 key");
             return SignatureStatus::KeyNotFound;
         }
 
-        // Parse public key
-        #[cfg(target_os = "uefi")]
         let public_key = match PublicKey::from_bytes(public_key) {
             Ok(key) => key,
             Err(_) => {
@@ -96,17 +94,6 @@ impl SignatureVerifier {
             }
         };
 
-        #[cfg(not(target_os = "uefi"))]
-        let public_key = match VerifyingKey::from_bytes(public_key) {
-            Ok(key) => key,
-            Err(_) => {
-                log_error("crypto", "Failed to parse Ed25519 public key");
-                return SignatureStatus::MalformedSignature;
-            }
-        };
-
-        // Parse signature
-        #[cfg(target_os = "uefi")]
         let signature = match Signature::from_bytes(signature) {
             Ok(sig) => sig,
             Err(_) => {
@@ -115,10 +102,6 @@ impl SignatureVerifier {
             }
         };
 
-        #[cfg(not(target_os = "uefi"))]
-        let signature = Signature::from_bytes(signature);
-
-        // Verify signature
         match public_key.verify(data, &signature) {
             Ok(()) => {
                 log_info("crypto", "Ed25519 signature verification successful");
@@ -132,102 +115,65 @@ impl SignatureVerifier {
     }
 }
 
-// NØNOS trusted signing keys (embedded at build time)
+// NØNOS trusted signing keys (embedded example keys; replace in production)
 const NONOS_SIGNING_KEY: [u8; 32] = [
-    0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88,
-    0x99, 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff, 0x00, 0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef,
+    0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0,
+    0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88,
+    0x99, 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff, 0x00,
+    0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef,
 ];
 
 const NONOS_BACKUP_KEY: [u8; 32] = [
-    0xef, 0xcd, 0xab, 0x89, 0x67, 0x45, 0x23, 0x01, 0x00, 0xff, 0xee, 0xdd, 0xcc, 0xbb, 0xaa, 0x99,
-    0x88, 0x77, 0x66, 0x55, 0x44, 0x33, 0x22, 0x11, 0xf0, 0xde, 0xbc, 0x9a, 0x78, 0x56, 0x34, 0x12,
+    0xef, 0xcd, 0xab, 0x89, 0x67, 0x45, 0x23, 0x01,
+    0x00, 0xff, 0xee, 0xdd, 0xcc, 0xbb, 0xaa, 0x99,
+    0x88, 0x77, 0x66, 0x55, 0x44, 0x33, 0x22, 0x11,
+    0xf0, 0xde, 0xbc, 0x9a, 0x78, 0x56, 0x34, 0x12,
 ];
 
-/// Enhanced verification function with backward compatibility
-pub fn verify_signature(blob: &[u8], meta: &CapsuleMetadata) -> bool {
-    // Extract signature and payload slices
-    let sig_start = meta.offset_sig;
-    let sig_end = sig_start + meta.len_sig;
-    let pay_start = meta.offset_payload;
-    let pay_end = pay_start + meta.len_payload;
-
-    if sig_end > blob.len() || pay_end > blob.len() {
-        log_error("crypto", "Invalid signature or payload bounds");
+/// Primary detached-signature verification used by the capsule pipeline.
+///
+/// - Validates layout via `validate_capsule_layout`
+/// - Extracts `(signature, payload)` via `extract_signature_and_payload`
+/// - Verifies with `verify_ed25519_signature` (trusted keyring in `verify.rs`)
+pub fn verify_signature(blob: &[u8], meta: &CapsuleMeta) -> bool {
+    // Strict bounds/layout validation first.
+    if let Err(e) = validate_capsule_layout(blob, meta) {
+        log_error("crypto", e);
         return false;
     }
 
-    let signature_bytes = &blob[sig_start..sig_end];
-    let payload_bytes = &blob[pay_start..pay_end];
+    // Safe slicing of detached signature/proof and payload.
+    let (signature_bytes, payload_bytes) = match extract_signature_and_payload(blob, meta) {
+        Ok((sig, payload)) => (sig, payload),
+        Err(e) => {
+            log_error("crypto", e);
+            return false;
+        }
+    };
 
-    // Validate signature format
+    // Only Ed25519 (64-byte) signatures are accepted here.
     if signature_bytes.len() != 64 {
-        log_error("crypto", "Invalid signature length");
+        log_error("crypto", "Invalid signature length (expected 64 for Ed25519)");
         return false;
     }
 
-    // Check for null signature (security risk)
-    if signature_bytes.iter().all(|&b| b == 0) {
-        log_error("crypto", "Null signature detected");
-        return false;
-    }
-
-    // Create signature verifier
-    let verifier = SignatureVerifier::new();
-
-    // Hash the payload for signature verification
-    let payload_hash = blake3::hash(payload_bytes);
-
-    // Try to verify with Ed25519
-    if signature_bytes.len() == 64 {
-        // Extract potential public key from signature section (not secure, just for compatibility)
-        // In production, public key would be embedded or provided separately
-        let mut pubkey = [0u8; 32];
-        let mut signature = [0u8; 64];
-
-        // For compatibility, derive a consistent "public key" from the first 32 bytes
-        // This is not cryptographically secure - real implementation would use proper keys
-        let temp_key = blake3::hash(&signature_bytes[..32]);
-        pubkey.copy_from_slice(temp_key.as_bytes());
-        signature.copy_from_slice(signature_bytes);
-
-        // Add this derived key as trusted for backward compatibility
-        let mut temp_verifier = verifier;
-        temp_verifier.add_trusted_ed25519_key(&pubkey);
-
-        match temp_verifier.verify_ed25519_signature(payload_hash.as_bytes(), &signature, &pubkey) {
-            SignatureStatus::Valid => {
-                log_info("crypto", "Capsule signature verification successful");
-                return true;
-            }
-            _ => {
-                log_warn("crypto", "Ed25519 verification failed, trying fallback");
-            }
+    match verify_ed25519_signature(&payload_bytes, &signature_bytes) {
+        Ok(true) => {
+            log_info("crypto", "Capsule signature verification successful");
+            true
         }
-    }
-
-    // Fallback to hash-based verification for compatibility
-    let payload_hash = blake3::hash(payload_bytes);
-    let expected_sig_hash = blake3::hash(payload_hash.as_bytes());
-
-    // Simple integrity check - not cryptographically secure
-    if signature_bytes.len() >= 32 {
-        let sig_hash = blake3::hash(&signature_bytes[..32]);
-        let verification_passed = sig_hash.as_bytes()[..16] == expected_sig_hash.as_bytes()[..16];
-
-        if verification_passed {
-            log_info("crypto", "Fallback signature verification successful");
-        } else {
-            log_warn("crypto", "All signature verification methods failed");
+        Ok(false) => {
+            log_warn("crypto", "Ed25519 verification failed");
+            false
         }
-
-        verification_passed
-    } else {
-        log_error("crypto", "Signature too short for any verification method");
-        false
+        Err(e) => {
+            log_error("crypto", e);
+            false
+        }
     }
 }
 
-/// Advanced cryptographic self-test
+/// Advanced cryptographic self-test (kept for diagnostics)
 pub fn perform_crypto_self_test() -> bool {
     log_info("crypto", "Performing comprehensive cryptographic self-test");
 
@@ -237,7 +183,6 @@ pub fn perform_crypto_self_test() -> bool {
     let test_data = b"NONOS cryptographic self-test vector";
     let hash1 = blake3::hash(test_data);
     let hash2 = blake3::hash(test_data);
-
     if hash1.as_bytes() != hash2.as_bytes() {
         log_error("crypto", "Hash consistency test failed");
         return false;
@@ -246,16 +191,14 @@ pub fn perform_crypto_self_test() -> bool {
     // Test 2: Different data produces different hashes
     let test_data2 = b"NONOS different test vector";
     let hash3 = blake3::hash(test_data2);
-
     if hash1.as_bytes() == hash3.as_bytes() {
         log_error("crypto", "Hash uniqueness test failed");
         return false;
     }
 
-    // Test 3: Signature format validation
+    // Test 3: Signature shape sanity
     let mut test_signature = [0u8; 64];
     test_signature[0] = 0x42; // Non-zero signature
-
     if test_signature.iter().all(|&b| b == 0) {
         log_error("crypto", "Signature validation test failed");
         return false;

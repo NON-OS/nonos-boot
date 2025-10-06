@@ -1,7 +1,5 @@
-//! NØNOS Preboot Entropy Generator — Hardened Capsule Seeder
-//! eK@nonos-tech.xyz
-//!
-//! - EFI RNG
+//! NØNOS Preboot Entropy Generator — Capsule Seeder
+//! - EFI RNG 
 //! - RDSEED/RDRAND
 //! - TSC jitter with lfence serialization
 //! - RTC time salt
@@ -9,47 +7,45 @@
 
 #![allow(dead_code)]
 
-use crate::handoff::ZeroStateBootInfo;
 use uefi::table::boot::BootServices;
 use uefi_services::system_table;
+use crate::handoff::ZeroStateBootInfo;
 
 use blake3; // add in Cargo.toml
 
-/// Custom getrandom implementation for UEFI environment
-/// This provides the getrandom backend that blake3 and other crypto libs need
-///
-/// # Safety
-/// The caller must ensure that `buf` is a valid pointer to a mutable buffer
-/// of at least `len` bytes.
+/* --------------------- UEFI getrandom backend --------------------- */
+
+/// Custom getrandom implementation for UEFI environment.
+/// This provides the getrandom backend that blake3 and other crypto libs need.
 #[no_mangle]
-pub unsafe extern "C" fn getrandom(buf: *mut u8, len: usize, _flags: u32) -> isize {
+pub extern "C" fn getrandom(buf: *mut u8, len: usize, _flags: u32) -> isize {
     if buf.is_null() || len == 0 {
         return -1;
     }
-
+    
     let slice = unsafe { core::slice::from_raw_parts_mut(buf, len) };
-
-    // Use our advanced entropy collection system
+    
+    // Use the advanced entropy collection system
     let st = unsafe { system_table().as_ref() };
     let bt = st.boot_services();
     let entropy_pool = collect_boot_entropy(bt);
-    // Fill buffer with entropy using BLAKE3 expansion
+    
+    // Expand entropy with BLAKE3 XOF
     let mut hasher = blake3::Hasher::new();
     hasher.update(&entropy_pool);
     hasher.finalize_xof().fill(slice);
-
+    
     len as isize
 }
-// If you can, depend on uefi::proto::rng
-#[cfg(feature = "efi-rng")]
-use uefi::proto::rng::{Algorithm, Rng};
+
+/* --------------------- Constants --------------------- */
 
 /// Domain separation labels
 const DS_ENTROPY_ACCUM: &str = "NONOS:BOOT:ENTROPY:ACCUM";
 const DS_ENTROPY_OUTPUT: &str = "NONOS:BOOT:ENTROPY:OUTPUT";
 
-/// Collect a hardened entropy pool from EFI RNG, RDSEED/RDRAND, TSC jitter and RTC.
-/// Returns 64 bytes suitable for seeding your DRBG/PRNG.
+/* --------------------- Public API --------------------- */
+
 /// Collect 64 bytes of boot entropy - public API
 pub fn collect_boot_entropy_64() -> Result<[u8; 64], &'static str> {
     let st = unsafe { system_table().as_ref() };
@@ -57,12 +53,12 @@ pub fn collect_boot_entropy_64() -> Result<[u8; 64], &'static str> {
     Ok(collect_boot_entropy(bt))
 }
 
-/// Get RTC timestamp as 8-byte array
+/// Get RTC timestamp as 8-byte array (for compatibility with loader.rs)
 pub fn get_rtc_timestamp() -> [u8; 8] {
     let st = unsafe { system_table().as_ref() };
     if let Ok(rtc) = st.runtime_services().get_time() {
         let mut buf = [0u8; 8];
-        buf[0..2].copy_from_slice(&rtc.year().to_le_bytes());
+        buf[0..2].copy_from_slice(&(rtc.year() as u16).to_le_bytes());
         buf[2] = rtc.month();
         buf[3] = rtc.day();
         buf[4] = rtc.hour();
@@ -71,34 +67,60 @@ pub fn get_rtc_timestamp() -> [u8; 8] {
         buf[7] = (rtc.nanosecond() / 1_000_000) as u8; // milliseconds
         buf
     } else {
-        // Fallback: use TSC if RTC fails
-        let tsc = rdtsc_serialized();
-        tsc.to_le_bytes()
+        rdtsc_serialized().to_le_bytes()
     }
 }
+
+/// Get RTC entropy as 16-byte array (richer than get_rtc_timestamp)
+pub fn collect_rtc() -> [u8; 16] {
+    let st = unsafe { system_table().as_ref() };
+    if let Ok(rtc) = st.runtime_services().get_time() {
+        let mut rtc_buf = [0u8; 16];
+        rtc_buf[0..4].copy_from_slice(&(rtc.year() as u32).to_le_bytes());
+        rtc_buf[4] = rtc.month();
+        rtc_buf[5] = rtc.day();
+        rtc_buf[6] = rtc.hour();
+        rtc_buf[7] = rtc.minute();
+        rtc_buf[8] = rtc.second();
+        rtc_buf[9..13].copy_from_slice(&(rtc.nanosecond() as u32).to_le_bytes());
+        rtc_buf[13] = match rtc.time_zone() { Some(tz) => tz as u8, None => 0 };
+        rtc_buf[14] = match rtc.daylight() {
+            uefi::table::runtime::Daylight::ADJUST_DAYLIGHT => 1,
+            _ => 0,
+        };
+        rtc_buf[15] = 0;
+        rtc_buf
+    } else {
+        rdtsc_serialized().to_le_bytes().repeat(2).try_into().unwrap()
+    }
+}
+
+/// Populate entropy field in `ZeroStateBootInfo` capsule struct
+pub fn seed_entropy(info: &mut ZeroStateBootInfo, bs: &BootServices) {
+    let mut collected = collect_boot_entropy(bs);
+    info.entropy.copy_from_slice(&collected);
+    scrub(&mut collected);
+}
+
+/* --------------------- Entropy Collection --------------------- */
 
 pub fn collect_boot_entropy(bs: &BootServices) -> [u8; 64] {
     let mut h = blake3::Hasher::new_derive_key(DS_ENTROPY_ACCUM);
 
-    // 1) EFI RNG
+    // 1) EFI RNG (if feature enabled)
     #[cfg(feature = "efi-rng")]
-    if let Ok(handle) = bs.locate_protocol::<Rng>() {
-        // SAFETY: UEFI protocol obtained from BootServices
+    if let Ok(handle) = bs.locate_protocol::<uefi::proto::rng::Rng>() {
         let rng = unsafe { &mut *handle.get() };
-        // Request 64 bytes from default algorithm
         let mut buf = [0u8; 64];
         if rng.get_rng(None, &mut buf).is_ok() {
             h.update(&buf);
             scrub(&mut buf);
         }
-        // Optionally also try specific algorithms:
-        // let _ = rng.get_rng(Some(&Algorithm::X9423Des), &mut buf);
     }
 
     // 2) RDSEED / RDRAND
     let mut hw = [0u8; 64];
     let mut off = 0usize;
-
     for _ in 0..32 {
         if let Some(x) = rdseed64() {
             hw[off % 64] ^= x as u8;
@@ -118,12 +140,10 @@ pub fn collect_boot_entropy(bs: &BootServices) -> [u8; 64] {
     // 3) TSC jitter with lfence serialization + micro stalls
     for round in 0..256u32 {
         let t1 = rdtsc_serialized();
-        // Stall in microseconds; vary slightly to collect platform jitter
-        bs.stall(23 + ((round as usize * 7) % 17));
+        bs.stall(23 + ((round as usize * 7) % 17) as usize);
         let t2 = rdtsc_serialized();
         let delta = t2.wrapping_sub(t1);
 
-        // Mix (structure the transcript; avoid ad-hoc xors)
         let mut frame = [0u8; 24];
         frame[0..8].copy_from_slice(&t1.to_le_bytes());
         frame[8..16].copy_from_slice(&t2.to_le_bytes());
@@ -132,37 +152,17 @@ pub fn collect_boot_entropy(bs: &BootServices) -> [u8; 64] {
         h.update(&frame);
     }
 
-    // 4) RTC salt (nanoseconds + seconds + day info)
-    let st = unsafe { system_table().as_ref() };
-    if let Ok(rtc) = st.runtime_services().get_time() {
-        let mut rtc_buf = [0u8; 16];
-        rtc_buf[0..4].copy_from_slice(&(rtc.year() as u32).to_le_bytes());
-        rtc_buf[4] = rtc.month();
-        rtc_buf[5] = rtc.day();
-        rtc_buf[6] = rtc.hour();
-        rtc_buf[7] = rtc.minute();
-        rtc_buf[8] = rtc.second();
-        rtc_buf[9..13].copy_from_slice(&rtc.nanosecond().to_le_bytes());
-        rtc_buf[13] = match rtc.time_zone() {
-            Some(tz) => tz as u8,
-            None => 0,
-        };
-        rtc_buf[14] = match rtc.daylight() {
-            uefi::table::runtime::Daylight::ADJUST_DAYLIGHT => 1,
-            _ => 0,
-        };
-        rtc_buf[15] = 0;
-        h.update(&rtc_buf);
-    }
+    // 4) RTC salt
+    h.update(&collect_rtc());
 
-    // Finalize to 64 bytes with distinct output key (backtracking resistance)
+    // Finalize to 64 bytes with distinct output key
     let mut out = [0u8; 64];
     blake3::Hasher::new_derive_key(DS_ENTROPY_OUTPUT)
         .update(h.finalize().as_bytes())
         .finalize_xof()
         .fill(&mut out);
 
-    // Minimal health check: reject all-zero and repeated patterns; if so, perturb with TSC
+    // Minimal health check
     if is_weak_entropy(&out) {
         let rescue = rdtsc_serialized().to_le_bytes();
         let mut hh = blake3::Hasher::new();
@@ -174,14 +174,7 @@ pub fn collect_boot_entropy(bs: &BootServices) -> [u8; 64] {
     out
 }
 
-/// Populate entropy field in `ZeroStateBootInfo` capsule struct
-pub fn seed_entropy(info: &mut ZeroStateBootInfo, bs: &BootServices) {
-    let mut collected = collect_boot_entropy(bs);
-    info.entropy.copy_from_slice(&collected);
-    scrub(&mut collected);
-}
-
-/* --------------------- helpers --------------------- */
+/* --------------------- Helpers --------------------- */
 
 #[inline(always)]
 fn scrub(b: &mut [u8]) {
@@ -197,19 +190,22 @@ fn is_weak_entropy(buf: &[u8; 64]) -> bool {
     if all_zero {
         return true;
     }
-    // crude repetition check
     let half = &buf[0..32];
     half == &buf[32..64]
 }
 
 #[inline(always)]
 fn rdtsc_serialized() -> u64 {
-    // Serialize with LFENCE to avoid OoO artifacts
     unsafe {
-        core::arch::asm!("lfence", "rdtsc", "lfence", out("rax") _, out("rdx") _, options(nostack));
         let mut hi: u32;
         let mut lo: u32;
-        core::arch::asm!("rdtsc", out("eax") lo, out("edx") hi, options(nomem, nostack, preserves_flags));
+        core::arch::asm!(
+            "lfence",
+            "rdtsc",
+            out("eax") lo,
+            out("edx") hi,
+            options(nomem, nostack, preserves_flags)
+        );
         ((hi as u64) << 32) | (lo as u64)
     }
 }
@@ -217,27 +213,20 @@ fn rdtsc_serialized() -> u64 {
 /// Try RDSEED (returns Some(u64) on success)
 #[inline(always)]
 fn rdseed64() -> Option<u64> {
-    // SAFETY: intrinsic returns 1 on success, 0 otherwise
-    #[cfg(target_arch = "x86_64")]
+    #[cfg(any(target_arch = "x86_64"))]
     unsafe {
         let mut x: u64 = 0;
         let ok = core::arch::x86_64::_rdseed64_step(&mut x);
-        if ok == 1 {
-            Some(x)
-        } else {
-            None
-        }
+        if ok == 1 { Some(x) } else { None }
     }
     #[cfg(not(any(target_arch = "x86_64")))]
-    {
-        None
-    }
+    { None }
 }
 
 /// Try RDRAND (returns Some(u64) on success)
 #[inline(always)]
 fn rdrand64() -> Option<u64> {
-    #[cfg(target_arch = "x86_64")]
+    #[cfg(any(target_arch = "x86_64"))]
     unsafe {
         let mut x: u64;
         let ok: u8;
@@ -248,14 +237,8 @@ fn rdrand64() -> Option<u64> {
             ok = out(reg_byte) ok,
             options(nostack, nomem)
         );
-        if ok != 0 {
-            Some(x)
-        } else {
-            None
-        }
+        if ok != 0 { Some(x) } else { None }
     }
     #[cfg(not(any(target_arch = "x86_64")))]
-    {
-        None
-    }
+    { None }
 }

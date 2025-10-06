@@ -655,7 +655,7 @@ impl SecureLoader {
         }
 
         // For now, return empty measurements - full implementation would parse PCR values
-        // This is where you'd parse TPM measurements, hardware attestation data, etc.
+        // This is where we'd parse TPM measurements, hardware attestation data, etc.
         Ok(MeasurementData {
             pcr_values: BTreeMap::new(),
             boot_measurements: Vec::new(),
@@ -877,7 +877,7 @@ impl SecureLoader {
 
     /// Collect baseline system measurements
     fn collect_baseline_measurements() -> MeasurementData {
-        // In a real implementation, this would collect TPM PCR values,
+        // This would collect TPM PCR values,
         // UEFI secure boot state, CPU features, etc.
         MeasurementData {
             pcr_values: BTreeMap::new(),
@@ -930,13 +930,13 @@ impl SecureLoader {
 
     /// Get current time (mock implementation)
     fn get_current_time(&self) -> u64 {
-        // In real implementation, use UEFI time services
+        // Should use UEFI time services
         0x1000000000 // Mock timestamp
     }
 
     /// Get microsecond timestamp (mock implementation)
     fn get_microseconds(&self) -> u64 {
-        // In real implementation, use high-resolution timer
+        // Next use high-resolution timer
         0
     }
 
