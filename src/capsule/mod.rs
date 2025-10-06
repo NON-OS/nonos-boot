@@ -1,10 +1,11 @@
 pub mod zkmeta;
 
-use crate::handoff::ZeroStateBootInfo;
+use xmas_elf::{ElfFile, program::Type};
+#[cfg(not(feature = "mock-proof"))]
 use crate::verify::verify_ed25519_signature;
-use xmas_elf::{program::Type, ElfFile};
+use crate::handoff::ZeroStateBootInfo;
 
-/// Represents a verified kernel capsule
+/// Represents a verified kernel capsule 
 #[derive(Debug)]
 pub struct Capsule {
     pub base: *mut u8,
@@ -23,10 +24,10 @@ impl Capsule {
         // Parse ELF file
         let elf = ElfFile::new(data).map_err(|_| "Invalid ELF file format")?;
 
-        // Verify it's a 64-bit executable
-        if elf.header.pt1.class() != xmas_elf::header::Class::ThirtyTwo
-            && elf.header.pt1.class() != xmas_elf::header::Class::SixtyFour
-        {
+        // Verify it's 32-bit or 64-bit executable (we only care that it's executable here)
+        let class = elf.header.pt1.class();
+        if class != xmas_elf::header::Class::ThirtyTwo &&
+           class != xmas_elf::header::Class::SixtyFour {
             return Err("Unsupported ELF class");
         }
 
@@ -44,25 +45,19 @@ impl Capsule {
         #[cfg(not(feature = "mock-proof"))]
         {
             // Find .nonos.manifest section for signature verification
-            let manifest_section = elf
-                .find_section_by_name(".nonos.manifest")
+            let manifest_section = elf.find_section_by_name(".nonos.manifest")
                 .ok_or("Missing .nonos.manifest section")?;
-            let manifest_data = match manifest_section
-                .get_data(&elf)
-                .map_err(|_| "Cannot read manifest section")?
-            {
+            let manifest_data = match manifest_section.get_data(&elf)
+                .map_err(|_| "Cannot read manifest section")? {
                 xmas_elf::sections::SectionData::Undefined(data) => data,
                 _ => return Err("Manifest section has wrong type"),
             };
 
             // Find .nonos.sig section
-            let sig_section = elf
-                .find_section_by_name(".nonos.sig")
+            let sig_section = elf.find_section_by_name(".nonos.sig")
                 .ok_or("Missing .nonos.sig section")?;
-            let signature_data = match sig_section
-                .get_data(&elf)
-                .map_err(|_| "Cannot read signature section")?
-            {
+            let signature_data = match sig_section.get_data(&elf)
+                .map_err(|_| "Cannot read signature section")? {
                 xmas_elf::sections::SectionData::Undefined(data) => data,
                 _ => return Err("Signature section has wrong type"),
             };
@@ -73,20 +68,20 @@ impl Capsule {
             }
         }
 
+        // Skip signature verification in mock-proof mode for testing
         #[cfg(feature = "mock-proof")]
         {
-            // Skip signature verification in mock-proof mode for testing
+            // no-op
         }
 
-        // Calculate total memory size needed for all LOAD segments
-        let mut _total_size = 0;
+        // Walk LOAD segments to validate there is something to load
         let mut min_addr = usize::MAX;
         let mut max_addr = 0;
 
-        for program_header in elf.program_iter() {
-            if program_header.get_type() == Ok(Type::Load) {
-                let vaddr = program_header.virtual_addr() as usize;
-                let memsz = program_header.mem_size() as usize;
+        for ph in elf.program_iter() {
+            if ph.get_type() == Ok(Type::Load) {
+                let vaddr = ph.virtual_addr() as usize;
+                let memsz = ph.mem_size() as usize;
 
                 min_addr = min_addr.min(vaddr);
                 max_addr = max_addr.max(vaddr + memsz);
@@ -97,24 +92,17 @@ impl Capsule {
             return Err("No loadable segments found");
         }
 
-        _total_size = max_addr - min_addr;
-
-        // Get 64 bytes of boot entropy
+        // Boot randomness and RTC timestamp
         let entropy_64 = crate::entropy::collect_boot_entropy_64()?;
-
-        // Get RTC timestamp
         let rtc_utc = crate::entropy::get_rtc_timestamp();
 
-        // Create handoff info using the proper builder
+        // Commitment hash: real manifest (default) or placeholder (mock-proof)
         #[cfg(not(feature = "mock-proof"))]
         let commitment_hash = {
-            let manifest_section = elf
-                .find_section_by_name(".nonos.manifest")
+            let manifest_section = elf.find_section_by_name(".nonos.manifest")
                 .ok_or("Missing .nonos.manifest section for commitment")?;
-            let manifest_data = match manifest_section
-                .get_data(&elf)
-                .map_err(|_| "Cannot read manifest section for commitment")?
-            {
+            let manifest_data = match manifest_section.get_data(&elf)
+                .map_err(|_| "Cannot read manifest section for commitment")? {
                 xmas_elf::sections::SectionData::Undefined(data) => data,
                 _ => return Err("Manifest section has wrong type for commitment"),
             };
@@ -123,33 +111,32 @@ impl Capsule {
 
         #[cfg(feature = "mock-proof")]
         let commitment_hash = {
-            // Use a placeholder hash in mock-proof mode
             *blake3::hash(b"MOCK_PROOF_PLACEHOLDER").as_bytes()
         };
 
-        let handoff = crate::handoff::build_bootinfo(crate::handoff::BootInfoParams {
-            capsule_base: data.as_ptr() as u64,
-            capsule_size: data.len() as u64,
-            capsule_hash: commitment_hash,
-            memory_start: 0x100000, // 1MB memory start (typical after firmware)
-            memory_size: 0x40000000, // 1GB total memory (will be updated by memory detection)
-            entropy64: entropy_64,
+        // Handoff info
+        let handoff = crate::handoff::build_bootinfo(
+            data.as_ptr() as u64,
+            data.len() as u64,
+            commitment_hash,
+            0x100000,     // 1MB memory start (typical after firmware)
+            0x40000000,   // 1GB total memory (placeholder; real value via memory detection)
+            &entropy_64,
             rtc_utc,
-            boot_flags: crate::handoff::BootModeFlags::SECURE_BOOT
-                | crate::handoff::BootModeFlags::COLD_START,
-        });
+            crate::handoff::BootModeFlags::SECURE_BOOT | crate::handoff::BootModeFlags::COLD_START,
+        );
 
         Ok(Capsule {
             base: data.as_ptr() as *mut u8,
-            size: data.len(), // Use actual file size, not virtual memory size
+            size: data.len(), // Use actual file size
             entry_point,
             handoff,
         })
     }
 
-    /// Verify the capsule (already done in from_blob, so this is a no-op)
+    /// Verify the capsule (already covered in `from_blob`)
     pub fn verify(&self) -> Result<(), &'static str> {
-        Ok(()) // Already verified in from_blob
+        Ok(())
     }
 
     /// Get the capsule commitment hash

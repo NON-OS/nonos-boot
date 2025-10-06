@@ -3,6 +3,7 @@
 
 extern crate alloc;
 
+// Core bootloader modules
 pub mod capsule;
 pub mod config;
 pub mod entropy;
@@ -15,20 +16,19 @@ pub mod security;
 pub mod testing;
 pub mod ui;
 pub mod verify;
-pub mod zkmeta;
+
+// Crypto & logging (use file-based module trees under src/crypto and src/log)
+pub mod crypto;
+pub mod log;
+
+// ZK verifier (concrete impl lives in src/zkverify.rs)
 pub mod zkverify;
 
-// Crypto modules
-pub mod crypto {
-    pub mod sig;
-}
+// Back-compat, keep the public path `crate::zkmeta` but point it to capsule::zkmeta.
+// (This avoids duplicate implementations/files.)
+pub use crate::capsule::zkmeta;
 
-// ZK modules
+// Optional convenience namespace: `crate::zk::*` re-exports zkverify symbols.
 pub mod zk {
-    pub mod zkverify;
-}
-
-// Logging modules
-pub mod log {
-    pub mod logger;
+    pub use crate::zkverify::*;
 }

@@ -2,14 +2,14 @@
 name = "nonos_boot"
 version = "0.1.0"
 edition = "2021"
-authors = ["NØNOS Contributors <dev@nonos-tech.xyz>"]
+authors = ["NØNOS Contributors <team@nonos.systems>"]
 description = "NØN•OS Capsule Bootloader — UEFI stage-0 loader for zero-trust capsule execution"
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/NON-OS/N0N-OS"
+repository = "https://github.com/NON-OS/nonos-boot"
 keywords = ["bootloader", "uefi", "zkproof", "os", "capsule"]
 categories = ["os::boot", "cryptography", "security"]
 readme = "../README.md"
-documentation = "https://docs.nonos-tech.xyz/boot"
+documentation = "https://docs.nonos.systems"
 
 [[bin]]
 name = "nonos_boot"
@@ -29,30 +29,13 @@ bootloader_api = { version = "0.11", default-features = false }
 
 # Capsule cryptographic pipeline
 blake3 = { version = "1.5", default-features = false, features = ["pure"] }
-# Use older ed25519-dalek to avoid SIMD/getrandom issues on UEFI
-[target.'cfg(target_os = "uefi")'.dependencies.ed25519-dalek]
-version = "1.0"
-default-features = false
-features = ["u64_backend"]
-
-# Use newer version for other targets
-[target.'cfg(not(target_os = "uefi"))'.dependencies.ed25519-dalek] 
-version = "2.1"
-default-features = false
-features = ["rand_core"]
-
+ed25519-dalek = { version = "1.0", default-features = false, features = ["u64_backend"] }
 heapless = { version = "0.8", default-features = false }
-
 # rand = { version = "0.8", features = ["std"], default-features = false }  # Commented out - getrandom not supported in UEFI
 # digest = "0.10"  # Conflicts with uefi panic_impl
 halo2_proofs = { version = "0.2", optional = true }    # Future support for zkProofs
 snarkvm = { version = "0.11", optional = true }
-
-# Use older curve25519-dalek for UEFI target to avoid SIMD issues
-[target.'cfg(target_os = "uefi")'.dependencies.curve25519-dalek]
-version = "3.2"
-default-features = false
-features = ["u64_backend"]
+spin = "0.10.0"
 
 # Internal UI logger abstraction
 [target.'cfg(uefi)'.dependencies]
@@ -65,8 +48,8 @@ mock-proof = []
 efi-rng = []
 nonos-syscall-msr = []
 nonos-cet = []
-# zk-snark = ["halo2_proofs"]  # Disabled for UEFI compatibility
-# zk-snarkvm = ["snarkvm"]  # Disabled for UEFI compatibility
+zk-snark = ["halo2_proofs"]
+zk-snarkvm = ["snarkvm"]
 
 [build-dependencies]
 cc = "1.0"
