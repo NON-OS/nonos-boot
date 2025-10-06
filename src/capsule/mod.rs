@@ -115,13 +115,14 @@ impl Capsule {
         };
 
         // Handoff info
-        let handoff = crate::handoff::build_bootinfo(
+let handoff = crate::handoff::build_bootinfo(
+            0x4E4F_4E4F_5342_4F4Fu64,
             data.as_ptr() as u64,
             data.len() as u64,
             commitment_hash,
             0x100000,     // 1MB memory start (typical after firmware)
             0x40000000,   // 1GB total memory (placeholder; real value via memory detection)
-            &entropy_64,
+            entropy_64[0..32].try_into().unwrap(),
             rtc_utc,
             crate::handoff::BootModeFlags::SECURE_BOOT | crate::handoff::BootModeFlags::COLD_START,
         );

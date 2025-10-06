@@ -30,7 +30,18 @@ use nonos_boot::multiboot::MultiBootManager;
 use nonos_boot::testing::TestingFramework;
 
 /// External capsule entry signature
-type KernelEntry = extern "C" fn(*const ZeroStateBootInfo) -> !;
+type KernelEntry = extern "sysv64" fn(*const ZeroStateBootInfo) -> !;
+
+/// Captured GOP information
+struct GopInfo {
+    base: u64,
+    size: u64,
+    pitch: u32,
+    width: u32,
+    height: u32,
+    bpp: u16,
+    fmt_code: u16,
+}
 
 #[entry]
 fn efi_main(_handle: Handle, mut system_table: SystemTable<Boot>) -> Status {
@@ -111,6 +122,9 @@ fn efi_main(_handle: Handle, mut system_table: SystemTable<Boot>) -> Status {
     probe_and_log_gop(&mut system_table);
     initialize_graphics(&mut system_table);
     setup_memory_management(&mut system_table);
+    
+    // Capture GOP info for handoff AFTER mode is set
+    let gop_info = capture_gop_info(&mut system_table);
 
     // Phase 5: Multi-boot
     let _ = system_table.stdout().output_string(cstr16!("Phase 5: Multi-Boot & Boot Source Selection\r\n"));
@@ -229,7 +243,7 @@ fn efi_main(_handle: Handle, mut system_table: SystemTable<Boot>) -> Status {
         handoff_local.hdr_size = core::mem::size_of::<ZeroStateBootInfo>() as u16;
 
         // Fill GOP/FB info on the aligned local
-        fill_gop_into_handoff_local(&mut system_table, &mut handoff_local);
+        fill_gop_into_handoff_with_info(&mut handoff_local, &gop_info);
 
         // Commit back into the packed storage
         unsafe {
@@ -399,49 +413,67 @@ fn probe_and_log_gop(system_table: &mut SystemTable<Boot>) {
     }
 }
 
-/// Copy UEFI GOP framebuffer details into the handoff (called on aligned local).
-fn fill_gop_into_handoff_local(st: &mut SystemTable<Boot>, handoff: &mut ZeroStateBootInfo) {
-    // Defaults = “no framebuffer”
-    let mut base: u64 = 0;
-    let mut size: u64 = 0;
-    let mut pitch: u32 = 0;
-    let mut width: u32 = 0;
-    let mut height: u32 = 0;
-    let bpp: u16 = 32; // OVMF/QEMU typically 32bpp
-    let mut fmt_code: u16 = fb_format::UNKNOWN;
+/// Capture GOP information once to avoid multiple exclusive protocol opens
+fn capture_gop_info(st: &mut SystemTable<Boot>) -> GopInfo {
+    log_debug("gop", "Capturing GOP info for handoff");
+    let mut info = GopInfo {
+        base: 0,
+        size: 0,
+        pitch: 0,
+        width: 0,
+        height: 0,
+        bpp: 32, // OVMF/QEMU typically 32bpp
+        fmt_code: fb_format::UNKNOWN,
+    };
 
-    {
-        let bs = st.boot_services();
-        if let Ok(mut handles) = bs.find_handles::<GraphicsOutput>() {
-            if let Some(h) = handles.pop() {
-                if let Ok(mut gop) = bs.open_protocol_exclusive::<GraphicsOutput>(h) {
-                    let mode = gop.current_mode_info();
-                    let (w, hgt) = mode.resolution();
-                    width = w as u32;
-                    height = hgt as u32;
+    let bs = st.boot_services();
+    if let Ok(mut handles) = bs.find_handles::<GraphicsOutput>() {
+        log_debug("gop", "Found GOP handles");
+        if let Some(h) = handles.pop() {
+            log_debug("gop", "Opening GOP protocol");
+            if let Ok(mut gop) = bs.open_protocol_exclusive::<GraphicsOutput>(h) {
+                log_debug("gop", "GOP protocol opened successfully");
+                let mode = gop.current_mode_info();
+                let (w, hgt) = mode.resolution();
+                info.width = w as u32;
+                info.height = hgt as u32;
 
-                    // stride is in pixels; convert to bytes with assumed 32bpp
-                    let stride_px = mode.stride();
-                    pitch = (stride_px * (bpp as usize / 8)) as u32;
+                // stride is in pixels; convert to bytes with assumed 32bpp
+                let stride_px = mode.stride();
+                info.pitch = (stride_px * (info.bpp as usize / 8)) as u32;
 
-                    fmt_code = match mode.pixel_format() {
-                        PixelFormat::Rgb     => fb_format::RGB,
-                        PixelFormat::Bgr     => fb_format::BGR,
-                        PixelFormat::Bitmask => fb_format::BITMASK,
-                        PixelFormat::BltOnly => fb_format::BLTONLY,
-                    };
+                info.fmt_code = match mode.pixel_format() {
+                    PixelFormat::Rgb     => fb_format::RGB,
+                    PixelFormat::Bgr     => fb_format::BGR,
+                    PixelFormat::Bitmask => fb_format::BITMASK,
+                    PixelFormat::BltOnly => fb_format::BLTONLY,
+                };
 
-                    let mut fb = gop.frame_buffer();
-                    size = fb.size() as u64;
-                    base = fb.as_mut_ptr() as usize as u64;
-                }
+                let mut fb = gop.frame_buffer();
+                info.size = fb.size() as u64;
+                info.base = fb.as_mut_ptr() as usize as u64;
+                
+                log_info("gop", "GOP info captured successfully");
+            } else {
+                log_warn("gop", "Failed to open GOP protocol");
             }
+        } else {
+            log_warn("gop", "No GOP handles available");
         }
-    } // BS/GOP borrows drop here
-
-    if base != 0 && size != 0 && width != 0 && height != 0 {
-        handoff.set_framebuffer(base, size, pitch, width, height, bpp, fmt_code);
     } else {
+        log_warn("gop", "Failed to find GOP handles");
+    }
+
+    info
+}
+
+/// Fill handoff with captured GOP info
+fn fill_gop_into_handoff_with_info(handoff: &mut ZeroStateBootInfo, info: &GopInfo) {
+    if info.base != 0 && info.size != 0 && info.width != 0 && info.height != 0 {
+        log_info("gop", "Setting framebuffer in handoff");
+        handoff.set_framebuffer(info.base, info.size, info.pitch, info.width, info.height, info.bpp, info.fmt_code);
+    } else {
+        log_warn("gop", "No valid GOP found - setting empty framebuffer");
         handoff.set_framebuffer(0, 0, 0, 0, 0, 0, fb_format::UNKNOWN);
     }
 }
@@ -541,3 +573,4 @@ fn fatal_reset(st: &mut SystemTable<Boot>, reason: &str) -> ! {
 
     loop {}
 }
+	

@@ -27,7 +27,7 @@ use uefi::table::boot::{AllocateType, MemoryType};
 // use crate::capsule::Capsule; // Disabled for direct ELF loading
 use xmas_elf::ElfFile;
 // extern crate alloc; // Removed - might cause issues
-use crate::handoff::{ZeroStateBootInfo, build_bootinfo};
+use crate::handoff::{ZeroStateBootInfo, build_bootinfo, BootModeFlags};
 use crate::log::logger::{log_info, log_warn};
 use crate::entropy::collect_boot_entropy;
 
@@ -204,15 +204,16 @@ pub fn load_kernel_capsule(st: &mut SystemTable<Boot>) -> Result<KernelCapsule, 
     // Create RTC timestamp
     let rtc_timestamp = crate::entropy::get_rtc_timestamp();
     
-    let handoff = build_bootinfo(
+let handoff = build_bootinfo(
+        0x4E4F_4E4F_5342_4F4Fu64,
         capsule_base_phys(buffer),
         bytes_read as u64,
         [0u8; 32], // Mock commitment for now - should use real hash
         usable_memory_start,
         total_memory,
-        &entropy64,
+        entropy64[0..32].try_into().unwrap(),
         rtc_timestamp,
-        0, // boot_flags - could add debug, secure boot, etc.
+        BootModeFlags::NONE, // boot_flags - could add debug, secure boot, etc.
     );
     
     Ok(KernelCapsule {

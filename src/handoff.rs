@@ -1,75 +1,64 @@
-#![allow(dead_code)]
+#![no_std]
 
-extern crate alloc;
+/// ABI constants
+pub const ABI_VERSION: u16 = 1;
 
-use core::mem::size_of;
-
-// Expose current ABI version
-pub const ABI_VERSION: u16 = 2;
-
-// Framebuffer pixel-format codes shared with the kernel
+/// Framebuffer format enum (stable ABI: u16 codes)
 pub mod fb_format {
-    pub const RGB: u16     = 0;
-    pub const BGR: u16     = 1;
-    pub const BITMASK: u16 = 2;
-    pub const BLTONLY: u16 = 3;
-    pub const UNKNOWN: u16 = 0xFFFF;
+    pub const UNKNOWN: u16  = 0;
+    pub const RGB: u16      = 1;
+    pub const BGR: u16      = 2;
+    pub const BITMASK: u16  = 3;
+    pub const BLTONLY: u16  = 4;
 }
 
-// Bitflags compatible with earlier callers
-bitflags::bitflags! {
-    pub struct BootModeFlags: u32 {
-        const NONE        = 0;
-        const SECURE_BOOT = 1 << 0;
-        const MEASURED    = 1 << 1;
-        const COLD_START  = 1 << 2;
-        const WARM_START  = 1 << 3;
-        const NET_BOOT    = 1 << 4;
-        const PXE         = 1 << 5;
-        const HTTP        = 1 << 6;
-        const LEGACY_VGA  = 1 << 7;
-        const UEFI_GOP    = 1 << 8;
-    }
+/// Optional boot mode flags (bitfield)
+pub mod BootModeFlags {
+    pub const NONE: u32          = 0;
+    pub const SECURE_BOOT: u32   = 1 << 0;
+    pub const COLD_START: u32    = 1 << 1;
+    pub const DIAGNOSTIC: u32    = 1 << 2;
 }
 
-/// Bootloader → Kernel handoff (ABI v2 with GOP/Framebuffer)
-#[repr(C, packed)]
+/// N0NOS boot handoff struct
+/// IMPORTANT: This is the canonical layout. Kernel must match this `repr(C)`.
+#[repr(C)]
 #[derive(Clone, Copy, Debug)]
 pub struct ZeroStateBootInfo {
-    // v1 fields
-    pub magic: u64,
-    pub abi_version: u16,
-    pub hdr_size: u16,
-    pub boot_flags: u32,
+    pub magic: u64,          // e.g. 0x4E4F4E4F_53424F4Fu64 ("NONOSBOO")
+    pub abi_version: u16,    // ABI version
+    pub hdr_size: u16,       // size_of::<ZeroStateBootInfo>()
+    pub boot_flags: u32,     // bitfield (see boot_flags)
 
-    pub capsule_base: u64,
-    pub capsule_size: u64,
+    pub capsule_base: u64,   // physical address of kernel capsule
+    pub capsule_size: u64,   // bytes
     pub capsule_hash: [u8; 32],
 
-    pub memory_start: u64,
+    pub memory_start: u64,   // optional metadata
     pub memory_size: u64,
 
     pub entropy: [u8; 32],
     pub rtc_utc: [u8; 8],
-    pub reserved: [u8; 8],
+    pub reserved: [u8; 8],   // keep for future
 
-    // v2 fields (GOP / linear framebuffer)
-    pub fb_base:   u64,  // physical address
-    pub fb_size:   u64,  // bytes
-    pub fb_pitch:  u32,  // bytes per scanline
-    pub fb_width:  u32,  // px
-    pub fb_height: u32,  // px
-    pub fb_bpp:    u16,  // bits per pixel (usually 32)
-    pub fb_format: u16,  // fb_format::* codes
+    // -------- Framebuffer / GOP (UEFI Graphics Output) --------
+    pub fb_base_phys: u64,   // physical base of linear framebuffer
+    pub fb_size: u64,        // total bytes of FB mapping
+    pub fb_pitch: u32,       // bytes per scanline
+    pub fb_width: u32,       // pixels
+    pub fb_height: u32,      // pixels
+    pub fb_bpp: u16,         // bits per pixel (typically 32)
+    pub fb_format: u16,      // fb_format::* code
 }
 
 impl ZeroStateBootInfo {
-    pub const fn new() -> Self {
-        Self {
-            magic: 0x4E304E2D4F535A53, // "N0N-OSZS" arbitrary magic; replace if you have a canonical one
+    /// Initialize a blank structure with required header fields.
+    pub fn new(magic: u64, boot_flags: u32) -> Self {
+        ZeroStateBootInfo {
+            magic,
             abi_version: ABI_VERSION,
-            hdr_size: size_of::<ZeroStateBootInfo>() as u16,
-            boot_flags: BootModeFlags::NONE.bits(),
+            hdr_size: core::mem::size_of::<ZeroStateBootInfo>() as u16,
+            boot_flags,
 
             capsule_base: 0,
             capsule_size: 0,
@@ -82,7 +71,7 @@ impl ZeroStateBootInfo {
             rtc_utc: [0u8; 8],
             reserved: [0u8; 8],
 
-            fb_base: 0,
+            fb_base_phys: 0,
             fb_size: 0,
             fb_pitch: 0,
             fb_width: 0,
@@ -92,97 +81,62 @@ impl ZeroStateBootInfo {
         }
     }
 
-    #[inline]
+    /// Set capsule location/size/hash
+    pub fn set_capsule(&mut self, base_phys: u64, size: u64, hash32: [u8; 32]) {
+        self.capsule_base = base_phys;
+        self.capsule_size = size;
+        self.capsule_hash = hash32;
+    }
+
+    /// Set memory region summary
+    pub fn set_memory(&mut self, start: u64, size: u64) {
+        self.memory_start = start;
+        self.memory_size = size;
+    }
+
+    /// Set entropy and RTC (UTC) timestamp (little-endian)
+    pub fn set_entropy_rtc(&mut self, entropy: [u8; 32], rtc_utc: [u8; 8]) {
+        self.entropy = entropy;
+        self.rtc_utc = rtc_utc;
+    }
+
+    /// Fill UEFI GOP framebuffer information
     pub fn set_framebuffer(
         &mut self,
-        base: u64,
+        base_phys: u64,
         size: u64,
-        pitch_bytes: u32,
+        pitch: u32,
         width: u32,
         height: u32,
         bpp: u16,
-        format: u16,
+        fmt_code: u16,
     ) {
-        self.fb_base   = base;
-        self.fb_size   = size;
-        self.fb_pitch  = pitch_bytes;
-        self.fb_width  = width;
+        self.fb_base_phys = base_phys;
+        self.fb_size = size;
+        self.fb_pitch = pitch;
+        self.fb_width = width;
         self.fb_height = height;
-        self.fb_bpp    = bpp;
-        self.fb_format = format;
-
-        // Mark that UEFI GOP is available
-        self.boot_flags |= BootModeFlags::UEFI_GOP.bits();
+        self.fb_bpp = bpp;
+        self.fb_format = fmt_code;
     }
 }
 
-/// ------------------------------------------------------------------------------------
-/// Legacy shim: callers in loader.rs/capsule/mod.rs expect `build_bootinfo(...)`.
-/// This constructor keeps their code compiling without touching call sites.
-/// If your call sites need a different signature, paste the compile error and
-/// we’ll add an overload shim here.
-/// ------------------------------------------------------------------------------------
-#[allow(clippy::too_many_arguments)]
-// ---- Compatibility helpers so older callsites keep compiling ----
-
-pub trait EntropyLike {
-    fn to32(self) -> [u8; 32];
-}
-
-impl EntropyLike for [u8; 32] {
-    #[inline] fn to32(self) -> [u8; 32] { self }
-}
-
-impl<'a> EntropyLike for &'a [u8; 64] {
-    #[inline] fn to32(self) -> [u8; 32] {
-        let mut out = [0u8; 32];
-        out.copy_from_slice(&self[..32]); // truncate
-        out
-    }
-}
-
-pub trait IntoBootFlags {
-    fn to_flags(self) -> BootModeFlags;
-}
-
-impl IntoBootFlags for BootModeFlags {
-    #[inline] fn to_flags(self) -> BootModeFlags { self }
-}
-
-impl IntoBootFlags for u32 {
-    #[inline] fn to_flags(self) -> BootModeFlags {
-        BootModeFlags::from_bits_truncate(self)
-    }
-}
-
-/// Generic shim that accepts both legacy and new call patterns.
-/// Works with:
-/// - entropy: [u8;32]  OR  & [u8;64]
-/// - boot_flags: BootModeFlags  OR  u32
-#[allow(clippy::too_many_arguments)]
-pub fn build_bootinfo<E, F>(
+/// Helper function to build a ZeroStateBootInfo
+pub fn build_bootinfo(
+    magic: u64,
     capsule_base: u64,
     capsule_size: u64,
     capsule_hash: [u8; 32],
     memory_start: u64,
     memory_size: u64,
-    entropy: E,
+    entropy: [u8; 32],
     rtc_utc: [u8; 8],
-    boot_flags: F,
-) -> ZeroStateBootInfo
-where
-    E: EntropyLike,
-    F: IntoBootFlags,
-{
-    let mut bi = ZeroStateBootInfo::new();
-    bi.capsule_base = capsule_base;
-    bi.capsule_size = capsule_size;
-    bi.capsule_hash = capsule_hash;
-    bi.memory_start = memory_start;
-    bi.memory_size  = memory_size;
-    bi.entropy      = entropy.to32();
-    bi.rtc_utc      = rtc_utc;
-    bi.boot_flags   = boot_flags.to_flags().bits();
-    bi
+    boot_flags: u32,
+) -> ZeroStateBootInfo {
+    let mut info = ZeroStateBootInfo::new(magic, boot_flags);
+    info.set_capsule(capsule_base, capsule_size, capsule_hash);
+    info.set_memory(memory_start, memory_size);
+    info.set_entropy_rtc(entropy, rtc_utc);
+    info
 }
 
