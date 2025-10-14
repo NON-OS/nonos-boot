@@ -1,289 +1,356 @@
-//! loader.rs — NØNOS Capsule Loader (UEFI FS → verified capsule → handoff build)
-//! eK@nonos-tech.xyz
-//
-// Responsibilities:
-// - Locate and open `nonos_kernel.efi` from EFI SimpleFileSystem
-// - Read into LOADER_DATA pages with a strict size limit
-// - Parse + validate capsule header & layout
-// - Run crypto/ZK verification
-// - Build ZeroStateBootInfo in memory (ready for kernel jump)
-// - Return verified entrypoint and capsule base for transfer
-//
-// Security changes:
-// - No hardcoded oversize alloc; alloc exactly required pages (bounded by MAX_CAPSULE_SIZE)
-// - Zero unused buffer tail after read
-// - Clear capsule buffer on error (avoid stale sensitive data)
-// - Early fail if header/magic invalid
-// - Handoff populated using `build_bootinfo()` with truncated entropy
-// - Entry point must be page-aligned inside payload span
+//! ELF loader for NONOS (UEFI)
 
+#![allow(dead_code)]
+
+use core::mem::{size_of, MaybeUninit};
 use core::slice;
 
+use crate::log::logger::{log_error, log_info, log_warn};
+use crate::verify::sha256;
+
 use uefi::prelude::*;
-use uefi::proto::media::file::{File, FileAttribute, FileMode, FileType};
+use uefi::proto::media::file::{File, FileAttribute, FileInfo, FileMode, FileType};
 use uefi::proto::media::fs::SimpleFileSystem;
-use uefi::table::boot::{AllocateType, MemoryType};
+use uefi::table::boot::{AllocateType, BootServices, MemoryType};
 use uefi::CStr16;
 
-// use crate::capsule::Capsule; // Disabled for direct ELF loading
-use xmas_elf::ElfFile;
-// extern crate alloc; // Removed - might cause issues
-use crate::entropy::collect_boot_entropy;
-use crate::handoff::{build_bootinfo, BootInfoParams, ZeroStateBootInfo};
-use crate::log::logger::{log_info, log_warn};
+// ------------------------------- Limits --------------------------------
 
-pub struct KernelCapsule {
-    pub entry_point: usize,
-    pub base: *mut u8,
-    pub size: usize,
-    pub handoff: ZeroStateBootInfo,
+const MAX_KERNEL_FILE_SIZE: usize = 64 * 1024 * 1024; // 64 MiB
+const MAX_LOAD_SEGMENTS: usize = 32;                  // sane cap for PT_LOAD segments
+const PAGE_SIZE: usize = 4096;
+
+// ------------------------------- ELF types -----------------------------
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct Elf64Ehdr {
+    e_ident: [u8; 16],
+    e_type: u16,
+    e_machine: u16,
+    e_version: u32,
+    e_entry: u64,
+    e_phoff: u64,
+    e_shoff: u64,
+    e_flags: u32,
+    e_ehsize: u16,
+    e_phentsize: u16,
+    e_phnum: u16,
+    e_shentsize: u16,
+    e_shnum: u16,
+    e_shstrndx: u16,
 }
 
-const MAX_CAPSULE_SIZE: usize = 32 * 1024 * 1024; // 32 MiB cap for sanity
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct Elf64Phdr {
+    p_type: u32,
+    p_flags: u32,
+    p_offset: u64,
+    p_vaddr: u64,
+    p_paddr: u64,
+    p_filesz: u64,
+    p_memsz: u64,
+    p_align: u64,
+}
 
-pub fn load_kernel_capsule(st: &mut SystemTable<Boot>) -> Result<KernelCapsule, &'static str> {
-    let bs = st.boot_services();
+const PT_LOAD: u32 = 1;
+const PF_X: u32 = 1;
+const PF_W: u32 = 2;
+const PF_R: u32 = 4;
 
-    // Locate filesystem
+// ------------------------------- Output model --------------------------
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct LoadedSegment {
+    /// Physical address returned by AllocatePages (LOADER_DATA), page-aligned
+    pub phys: u64,
+    /// Virtual address requested by ELF (for mapping policy)
+    pub vaddr: u64,
+    /// File-backed bytes copied into phys
+    pub filesz: u64,
+    /// Total in-memory size (BSS zeroed for tail)
+    pub memsz: u64,
+    /// ELF flags (PF_R/PF_W/PF_X)
+    pub flags: u32,
+    /// Alignment request (power-of-two, or 0/1 for none)
+    pub align: u64,
+}
+
+#[derive(Debug)]
+pub struct LoadedKernel {
+    /// Kernel entry virtual address from ELF header
+    pub entry_va: u64,
+    /// Per-segment allocations (LOADER_DATA)
+    pub segments: [LoadedSegment; MAX_LOAD_SEGMENTS],
+    pub seg_count: usize,
+    /// Raw file size (bytes)
+    pub image_size: usize,
+    /// SHA-256 of the raw ELF for measurement
+    pub image_sha256: [u8; 32],
+}
+
+impl Default for LoadedKernel {
+    fn default() -> Self {
+        Self {
+            entry_va: 0,
+            segments: [LoadedSegment::default(); MAX_LOAD_SEGMENTS],
+            seg_count: 0,
+            image_size: 0,
+            image_sha256: [0u8; 32],
+        }
+    }
+}
+
+// ------------------------------- Public API ----------------------------
+
+/// Load and stage the kernel ELF into LOADER_DATA pages, returning a LoadedKernel descriptor.
+/// The returned buffers must be freed or transitioned by the caller before ExitBootServices if needed.
+pub fn load_kernel(bs: &BootServices) -> Result<LoadedKernel, &'static str> {
+    let mut root = open_root_fs(bs).map_err(|e| e)?;
+    let mut file = open_kernel_file(bs, &mut root).map_err(|e| e)?;
+
+    // Read FileInfo to get size
+    let info = file_info(&mut file).map_err(|_| "[x] Failed to query kernel file info")?;
+    let file_size = info.file_size() as usize;
+    if file_size == 0 || file_size > MAX_KERNEL_FILE_SIZE {
+        return Err("[x] Kernel size invalid or exceeds limit");
+    }
+
+    // Allocate pages for a temporary read buffer
+    let tmp_pages = pages_for(file_size);
+    let tmp_phys = bs
+        .allocate_pages(AllocateType::AnyPages, MemoryType::LOADER_DATA, tmp_pages)
+        .map_err(|_| "[x] Failed to allocate read buffer")?;
+
+    let tmp_slice = unsafe { slice::from_raw_parts_mut(tmp_phys as *mut u8, file_size) };
+    // Read the file fully
+    let n = file.read(tmp_slice).map_err(|_| "[x] Failed to read kernel file")?;
+    if n != file_size {
+        // Zero on short read and free
+        zero_slice(tmp_slice);
+        let _ = bs.free_pages(tmp_phys, tmp_pages);
+        return Err("[x] Short read on kernel file");
+    }
+
+    // Compute measurement early
+    let image_sha256 = sha256(tmp_slice);
+
+    // Parse ELF header
+    let eh: Elf64Ehdr = read_pod(tmp_slice, 0).ok_or("[x] ELF header truncated")?;
+    if &eh.e_ident[0..4] != b"\x7FELF" {
+        cleanup_and_err(bs, tmp_phys, tmp_pages, "[x] Bad ELF magic");
+        return Err("[x] Bad ELF magic");
+    }
+    if eh.e_ident[4] != 2 /* 64-bit */ || eh.e_ident[5] != 1 /* little-endian */ {
+        cleanup_and_err(bs, tmp_phys, tmp_pages, "[x] Unsupported ELF class/endianness");
+        return Err("[x] Unsupported ELF class/endianness");
+    }
+    if eh.e_machine != 0x3E /* x86_64 */ {
+        cleanup_and_err(bs, tmp_phys, tmp_pages, "[x] Unsupported ELF machine");
+        return Err("[x] Unsupported ELF machine");
+    }
+    if eh.e_phentsize as usize != size_of::<Elf64Phdr>() {
+        cleanup_and_err(bs, tmp_phys, tmp_pages, "[x] Unexpected program header size");
+        return Err("[x] Unexpected program header size");
+    }
+    if eh.e_phnum == 0 {
+        cleanup_and_err(bs, tmp_phys, tmp_pages, "[x] No program headers");
+        return Err("[x] No program headers");
+    }
+    if eh.e_phnum as usize > MAX_LOAD_SEGMENTS {
+        cleanup_and_err(
+            bs,
+            tmp_phys,
+            tmp_pages,
+            "[x] Too many loadable segments (cap exceeded)",
+        );
+        return Err("[x] Too many loadable segments (cap exceeded)");
+    }
+
+    let mut kernel = LoadedKernel::default();
+    kernel.entry_va = eh.e_entry;
+    kernel.image_size = file_size;
+    kernel.image_sha256 = image_sha256;
+
+    let mut seg_count = 0usize;
+
+    // Iterate PT_LOAD segments
+    for i in 0..(eh.e_phnum as usize) {
+        let off = eh.e_phoff as usize + i * eh.e_phentsize as usize;
+        let ph: Elf64Phdr = match read_pod(tmp_slice, off) {
+            Some(v) => v,
+            None => {
+                cleanup_and_err(bs, tmp_phys, tmp_pages, "[x] Truncated program header");
+                return Err("[x] Truncated program header");
+            }
+        };
+
+        if ph.p_type != PT_LOAD {
+            continue;
+        }
+        if ph.p_memsz == 0 {
+            continue;
+        }
+
+        // Bounds check the file-backed part
+        let filesz = ph.p_filesz as usize;
+        let memsz = ph.p_memsz as usize;
+        let off = ph.p_offset as usize;
+
+        if filesz > 0 {
+            if off.checked_add(filesz).is_none() || off + filesz > tmp_slice.len() {
+                cleanup_and_err(bs, tmp_phys, tmp_pages, "[x] Segment exceeds file size");
+                return Err("[x] Segment exceeds file size");
+            }
+        }
+
+        // Enforce no RWX
+        if (ph.p_flags & PF_X) != 0 && (ph.p_flags & PF_W) != 0 {
+            cleanup_and_err(bs, tmp_phys, tmp_pages, "[x] Refusing RWX segment");
+            return Err("[x] Refusing RWX segment");
+        }
+
+        // Allocate pages for this segment
+        let seg_pages = pages_for(memsz);
+        let seg_phys = match bs.allocate_pages(AllocateType::AnyPages, MemoryType::LOADER_DATA, seg_pages) {
+            Ok(p) => p,
+            Err(_) => {
+                // Free previous segment allocations before returning
+                free_loaded_segments(bs, &kernel.segments, seg_count);
+                cleanup_and_err(bs, tmp_phys, tmp_pages, "[x] Out of memory for segment");
+                return Err("[x] Out of memory for segment");
+            }
+        };
+
+        // Copy file-backed bytes
+        let dst = unsafe { slice::from_raw_parts_mut(seg_phys as *mut u8, memsz) };
+        if filesz > 0 {
+            let src = &tmp_slice[off..off + filesz];
+            dst[..filesz].copy_from_slice(src);
+        }
+        // Zero BSS tail
+        if memsz > filesz {
+            dst[filesz..].fill(0);
+        }
+
+        kernel.segments[seg_count] = LoadedSegment {
+            phys: seg_phys,
+            vaddr: ph.p_vaddr,
+            filesz: ph.p_filesz,
+            memsz: ph.p_memsz,
+            flags: ph.p_flags,
+            align: ph.p_align,
+        };
+        seg_count += 1;
+    }
+
+    kernel.seg_count = seg_count;
+
+    // Free the temporary file buffer; segments remain allocated
+    zero_slice(tmp_slice); // avoid leaving code/data in free pool
+    let _ = bs.free_pages(tmp_phys, tmp_pages);
+
+    log_info("loader", "Kernel ELF validated and staged into LOADER_DATA");
+    if seg_count == 0 {
+        // Should not happen for a valid kernel
+        log_warn("loader", "No PT_LOAD segments found");
+    }
+
+    Ok(kernel)
+}
+
+// ------------------------------- Helpers --------------------------------
+
+fn open_root_fs(bs: &BootServices) -> Result<uefi::proto::media::file::Directory, &'static str> {
     let handles = bs
         .find_handles::<SimpleFileSystem>()
-        .map_err(|_| "[x] Missing SimpleFileSystem handles")?;
-
-    let handle = handles.first().ok_or("[x] No SimpleFileSystem found")?;
+        .map_err(|_| "[x] SimpleFileSystem handles not found")?;
+    let handle = handles.first().ok_or("[x] No SimpleFileSystem available")?;
     let mut fs = bs
         .open_protocol_exclusive::<SimpleFileSystem>(*handle)
         .map_err(|_| "[x] Failed to open SimpleFileSystem")?;
-
-    let mut root = fs.open_volume().map_err(|_| "[x] Cannot open FS volume")?;
-
-    // Open capsule file
-    let mut name_buffer = [0u16; 24];
-    let name = CStr16::from_str_with_buf("nonos_kernel.efi", &mut name_buffer)
-        .map_err(|_| "[x] Invalid capsule filename")?;
-
-    let file_handle = root
-        .open(name, FileMode::Read, FileAttribute::empty())
-        .map_err(|_| "[x] Capsule file not found")?;
-
-    let mut file = match file_handle
-        .into_type()
-        .map_err(|_| "[x] Capsule cast failed")?
-    {
-        FileType::Regular(f) => f,
-        _ => return Err("[x] Capsule is not a regular file"),
-    };
-
-    // Query file size to avoid overshoot
-    let mut info_buf = [0u8; 512]; // Buffer for file info
-    let info = file
-        .get_info::<uefi::proto::media::file::FileInfo>(&mut info_buf)
-        .map_err(|_| "[x] Failed to query capsule file info")?;
-    let file_size = info.file_size() as usize;
-    if file_size == 0 || file_size > MAX_CAPSULE_SIZE {
-        return Err("[x] Capsule size invalid or exceeds limit");
-    }
-
-    // Allocate just enough pages
-    let num_pages = file_size.div_ceil(4096);
-    let buffer = bs
-        .allocate_pages(AllocateType::AnyPages, MemoryType::LOADER_DATA, num_pages)
-        .map_err(|_| "[x] Failed to allocate capsule memory")?;
-    let capsule_slice = unsafe { slice::from_raw_parts_mut(buffer as *mut u8, file_size) };
-
-    // Read exactly file_size bytes
-    let bytes_read = file
-        .read(capsule_slice)
-        .map_err(|_| "[x] Failed to read capsule")?;
-    if bytes_read != file_size {
-        return Err("[x] Short read on capsule file");
-    }
-
-    // Parse ELF file with enhanced validation
-    let elf_file =
-        ElfFile::new(&capsule_slice[..bytes_read]).map_err(|_| "[x] Invalid ELF file format")?;
-
-    // Validate ELF file properties
-    if elf_file.header.pt1.class() != xmas_elf::header::Class::SixtyFour {
-        return Err("[x] Only 64-bit ELF files are supported");
-    }
-
-    if elf_file.header.pt1.data() != xmas_elf::header::Data::LittleEndian {
-        return Err("[x] Only little-endian ELF files are supported");
-    }
-
-    if elf_file.header.pt2.machine().as_machine() != xmas_elf::header::Machine::X86_64 {
-        return Err("[x] Only x86_64 architecture is supported");
-    }
-
-    log_info("loader", "ELF file validation passed");
-
-    // Get entry point from ELF header
-    let entry_point = elf_file.header.pt2.entry_point() as usize;
-    log_info("loader", "ELF entry point extracted");
-
-    // Process program headers and load segments to their correct physical addresses
-    let mut _kernel_base = 0usize;
-    let mut _kernel_size = 0usize;
-
-    // Find the lowest and highest addresses from loadable segments
-    let mut min_addr = usize::MAX;
-    let mut max_addr = 0usize;
-
-    for program_header in elf_file.program_iter() {
-        if program_header.get_type() == Ok(xmas_elf::program::Type::Load) {
-            let vaddr = program_header.virtual_addr() as usize;
-            let memsz = program_header.mem_size() as usize;
-
-            min_addr = min_addr.min(vaddr);
-            max_addr = max_addr.max(vaddr + memsz);
-        }
-    }
-
-    if min_addr != usize::MAX && max_addr > min_addr {
-        _kernel_base = min_addr;
-        _kernel_size = max_addr - min_addr;
-
-        log_info("loader", "Kernel memory layout determined");
-    } else {
-        return Err("[x] Could not determine kernel memory layout from ELF");
-    }
-
-    // Load segments to their correct physical addresses
-    for program_header in elf_file.program_iter() {
-        if program_header.get_type() == Ok(xmas_elf::program::Type::Load) {
-            let vaddr = program_header.virtual_addr() as usize;
-            let paddr = program_header.physical_addr() as usize;
-            let filesz = program_header.file_size() as usize;
-            let memsz = program_header.mem_size() as usize;
-            let offset = program_header.offset() as usize;
-
-            // Use physical address for loading
-            let load_addr = if paddr != 0 { paddr } else { vaddr };
-
-            // Copy segment data to the correct physical location
-            if filesz > 0 {
-                let src = &capsule_slice[offset..offset + filesz];
-                let dst = unsafe { core::slice::from_raw_parts_mut(load_addr as *mut u8, filesz) };
-                dst.copy_from_slice(src);
-            }
-
-            // Zero any remaining memory
-            if memsz > filesz {
-                let zero_dst = unsafe {
-                    core::slice::from_raw_parts_mut((load_addr + filesz) as *mut u8, memsz - filesz)
-                };
-                zero_dst.fill(0);
-            }
-
-            log_info("loader", "Segment loaded to physical address");
-        }
-    }
-
-    // Enhanced physical address mapping
-    const KERNEL_VMA: usize = 0xFFFF800000000000;
-    const PHYSICAL_LOAD_BASE: usize = 0x100000; // 1MB
-
-    let physical_entry_point = if entry_point >= KERNEL_VMA {
-        // High-half kernel: map to physical address
-        (entry_point - KERNEL_VMA) + PHYSICAL_LOAD_BASE
-    } else if entry_point >= 0x100000 {
-        // Already a physical address in valid range
-        entry_point
-    } else {
-        return Err("[x] Invalid kernel entry point address");
-    };
-
-    // Validate entry point is within expected kernel memory range
-    // The kernel loads to 0x100000 (1MB) physical, so entry point should be near there
-    if !(0x100000..0x200000).contains(&physical_entry_point) {
-        log_warn("loader", "Entry point outside expected kernel range");
-        // Still continue - this is just a warning for now
-    } else {
-        log_info("loader", "Entry point validation passed");
-    }
-
-    // Build ZeroStateBootInfo with enhanced memory information
-    let entropy64 = collect_boot_entropy(bs);
-
-    // Get memory map information for handoff
-    let (total_memory, usable_memory_start) = get_memory_info(bs);
-
-    // Create RTC timestamp
-    let rtc_timestamp = crate::entropy::get_rtc_timestamp();
-
-    let handoff = build_bootinfo(BootInfoParams {
-        capsule_base: capsule_base_phys(buffer),
-        capsule_size: bytes_read as u64,
-        capsule_hash: [0u8; 32], // Mock commitment for now - should use real hash
-        memory_start: usable_memory_start,
-        memory_size: total_memory,
-        entropy64,
-        rtc_utc: rtc_timestamp,
-        boot_flags: 0, // boot_flags - could add debug, secure boot, etc.
-    });
-
-    Ok(KernelCapsule {
-        entry_point: physical_entry_point,
-        base: buffer as *mut u8,
-        size: bytes_read,
-        handoff,
-    })
+    fs.open_volume().map_err(|_| "[x] Cannot open filesystem volume")
 }
 
-#[allow(dead_code)]
+fn open_kernel_file<'a>(
+    _bs: &BootServices,
+    root: &'a mut uefi::proto::media::file::Directory,
+) -> Result<uefi::proto::media::file::RegularFile, &'static str> {
+    // Keep filename stable for now; configurable via config.rs later.
+    let mut name_buffer = [0u16; 64];
+    let name = CStr16::from_str_with_buf("nonos_kernel.elf", &mut name_buffer)
+        .map_err(|_| "[x] Invalid kernel filename")?;
+
+    let fh = root
+        .open(name, FileMode::Read, FileAttribute::empty())
+        .map_err(|_| "[x] Kernel file not found")?;
+
+    match fh.into_type().map_err(|_| "[x] File type resolution failed")? {
+        FileType::Regular(f) => Ok(f),
+        _ => Err("[x] Kernel path is not a regular file"),
+    }
+}
+
+fn file_info(file: &mut uefi::proto::media::file::RegularFile) -> uefi::Result<FileInfo> {
+    // Query into a fixed stack buffer, retry with a pool if too small
+    let mut info_buf = [0u8; 512];
+    match file.get_info::<FileInfo>(&mut info_buf) {
+        Ok(i) => Ok(i),
+        Err(e) if e.status() == uefi::Status::BUFFER_TOO_SMALL => {
+            // Fall back to a dynamically sized pool buffer
+            let needed = e.data().map(|d| d.0).unwrap_or(1024usize);
+            let mut dyn_buf = alloc::vec![0u8; needed];
+            file.get_info::<FileInfo>(&mut dyn_buf)
+        }
+        Err(e) => Err(e),
+    }
+}
+
 #[inline]
-fn zero_buf(buf: &mut [u8]) {
-    for b in buf.iter_mut() {
+fn read_pod<T: Copy>(buf: &[u8], off: usize) -> Option<T> {
+    if off.checked_add(size_of::<T>())? > buf.len() {
+        return None;
+    }
+    let mut tmp = MaybeUninit::<T>::uninit();
+    unsafe {
+        core::ptr::copy_nonoverlapping(
+            buf.as_ptr().add(off),
+            tmp.as_mut_ptr() as *mut u8,
+            size_of::<T>(),
+        );
+        Some(tmp.assume_init())
+    }
+}
+
+#[inline]
+fn align_up(v: usize, a: usize) -> usize {
+    (v + a - 1) & !(a - 1)
+}
+
+#[inline]
+fn pages_for(bytes: usize) -> usize {
+    align_up(bytes.max(1), PAGE_SIZE) / PAGE_SIZE
+}
+
+#[inline]
+fn zero_slice(s: &mut [u8]) {
+    for b in s.iter_mut() {
         *b = 0;
     }
 }
 
-/// Get memory information from UEFI memory map
-fn get_memory_info(bs: &BootServices) -> (u64, u64) {
-    let mut total_memory = 0u64;
-    let mut usable_memory_start = 0x100000u64; // Default to 1MB
-
-    // Try to get memory map
-    let memory_map_size = bs.memory_map_size();
-    let buffer_size = memory_map_size.map_size + (memory_map_size.entry_size * 8);
-
-    // Allocate buffer for memory map
-    if let Ok(buffer_ptr) = bs.allocate_pages(
-        uefi::table::boot::AllocateType::AnyPages,
-        uefi::table::boot::MemoryType::LOADER_DATA,
-        buffer_size.div_ceil(4096),
-    ) {
-        let buffer = unsafe { slice::from_raw_parts_mut(buffer_ptr as *mut u8, buffer_size) };
-
-        if let Ok(memory_map) = bs.memory_map(buffer) {
-            let mut found_usable = false;
-
-            for descriptor in memory_map.entries() {
-                let size = descriptor.page_count * 4096;
-                total_memory += size;
-
-                // Look for the first large conventional memory region
-                if !found_usable &&
-                   descriptor.ty == uefi::table::boot::MemoryType::CONVENTIONAL &&
-                   size >= 16 * 1024 * 1024 && // At least 16MB
-                   descriptor.phys_start >= 0x100000
-                {
-                    // Above 1MB
-                    usable_memory_start = descriptor.phys_start;
-                    found_usable = true;
-                }
-            }
-        }
-
-        // Clean up allocated buffer
-        let _ = bs.free_pages(buffer_ptr, buffer_size.div_ceil(4096));
-    }
-
-    log_info("memory", "Memory map analysis completed");
-    (total_memory, usable_memory_start)
+fn cleanup_and_err(bs: &BootServices, phys: u64, pages: usize, _msg: &str) {
+    // Zero before free to avoid leaking image content in pool
+    let s = unsafe { slice::from_raw_parts_mut(phys as *mut u8, pages * PAGE_SIZE) };
+    zero_slice(s);
+    let _ = bs.free_pages(phys, pages);
 }
 
-#[inline]
-fn capsule_base_phys(ptr: u64) -> u64 {
-    ptr
+fn free_loaded_segments(bs: &BootServices, segs: &[LoadedSegment; MAX_LOAD_SEGMENTS], count: usize) {
+    for i in 0..count {
+        // Safe to free even if caller will drop after
+        let pages = pages_for(segs[i].memsz as usize);
+        let _ = bs.free_pages(segs[i].phys, pages);
+    }
 }
