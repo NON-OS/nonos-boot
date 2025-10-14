@@ -1,0 +1,42 @@
+[package]
+name = "nonos-attestation-circuit"
+version = "1.0.0"
+edition = "2021"
+publish = false
+license = "AGPL-3.0"
+authors = ["NONOS Team by eK <team@nonos.systems>"]
+description = "Attestation circuit for NONOS capsule integrity and hardware measurements"
+
+[lib]
+name = "nonos_attestation_circuit"
+path = "src/lib.rs"
+
+[[bin]]
+name = "generate-keys"
+path = "src/bin/generate_keys.rs"
+
+[dependencies]
+# Arkworks (no_std + alloc for the circuit library)
+ark-std             = { version = "0.4", default-features = false, features = ["alloc"] }
+ark-ff              = { version = "0.4", default-features = false, features = ["alloc"] }
+ark-ec              = { version = "0.4", default-features = false, features = ["alloc"] }
+ark-serialize       = { version = "0.4", default-features = false, features = ["alloc"] }
+ark-bls12-381       = { version = "0.4", default-features = false, features = ["curve"] }
+ark-groth16         = { version = "0.4", default-features = false, features = ["alloc"] }
+ark-relations       = { version = "0.4", default-features = false, features = ["alloc"] }
+ark-r1cs-std        = { version = "0.4", default-features = false, features = ["alloc"] }
+ark-crypto-primitives = { version = "0.4", default-features = false, features = ["alloc", "crh"] }
+# Note: Real signature gadgets added later (eddsa over ed_on_bls12_381), left out here intentionally.
+
+# Common utils
+blake3 = { version = "1.5", default-features = false, features = ["pure"] }
+sha2   = { version = "0.10", default-features = false }
+
+# The library is no_std, the binary uses std; keep std-only crates enabled via features
+serde = { version = "1.0", features = ["derive"], default-features = true }
+clap  = { version = "4.5", features = ["derive"], default-features = true }
+hex   = { version = "0.4", default-features = true }
+rand  = { version = "0.8", features = ["std"], default-features = true }
+
+# SNARK trait for setup utilities used by the binary
+ark-snark = { version = "0.4", default-features = true }
