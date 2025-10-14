@@ -36,28 +36,32 @@ It then prints ready-to-paste Rust consts and a mapping snippet for the bootload
 
 ## Diagram
 
-```mermaid
-flowchart TD
-    A[Program/Circuit ID bytes<br/>str | hex | file] --> B[BLAKE3::derive_key<br/>NONOS:ZK:PROGRAM:v1]
-    C[Verifying Key bytes<br/>arkworks compressed OR uncompressed] --> D[Deserialize VK<br/>try compressed else uncompressed]
-    
-    B --> E[PROGRAM_HASH<br/>32 bytes]
-    D --> F[Reserialize to<br/>canonical compressed bytes]
-    
-    E --> G[Rust consts + registry mapping]
-    F --> G
-    
-    G --> H[- PROGRAM_HASH_PREFIX<br/>- VK_PREFIX_BLS12_381_GROTH16<br/>- program_vk_lookup snippet]
-    
-    H --> I[Paste into boot/src/zk/zkverify.rs<br/>and build]
-    
-    style A fill:#e1f5fe
-    style C fill:#e1f5fe
-    style E fill:#f3e5f5
-    style F fill:#f3e5f5
-    style G fill:#e8f5e8
-    style I fill:#fff3e0
-```
++---------------------------+         +-----------------------------------+
+| Program/Circuit ID bytes  |         | Verifying Key bytes (arkworks)    |
+|   (str | hex | file)      |         |   compressed OR uncompressed      |
++-------------+-------------+         +-------------------+---------------+
+              |                                       |
+              | BLAKE3::derive_key( "NONOS:ZK:PROGRAM:v1" )  |
+              v                                       v
+      +----------------+                     +----------------------------+
+      | PROGRAM_HASH   |                     | Deserialize VK (try comp.) |
+      |   [32 bytes]   |                     | else (uncompressed)        |
+      +--------+-------+                     +---------------+------------+
+               \                                              |
+                \_____________________________________________|
+                               reserialize to
+                         canonical compressed bytes
+                                     |
+                                     v
+                    +------------------------------------+
+                    | Rust consts + registry mapping      |
+                    |  - PROGRAM_HASH_<PREFIX>            |
+                    |  - VK_<PREFIX>_BLS12_381_GROTH16    |
+                    |  - program_vk_lookup() snippet      |
+                    +-----------------+------------------+
+                                      |
+                                      v
+                   Paste into boot/src/zk/zkverify.rs and build
 
 ---
 
