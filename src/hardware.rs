@@ -1,11 +1,4 @@
-//! Advanced Hardware Discovery and ACPI Support for NØNOS
-//!
-//! This module provides comprehensive hardware detection including:
-//! - ACPI table discovery and parsing
-//! - PCI device enumeration
-//! - CPU feature detection
-//! - Memory topology analysis
-//! - Advanced storage and network device discovery
+//! Hardware discovery for NONOS (x86_64/UEFI)
 
 #![allow(dead_code)]
 
@@ -22,7 +15,6 @@ pub struct RsdpDescriptor {
     pub oem_id: [u8; 6],
     pub revision: u8,
     pub rsdt_address: u32,
-
     // ACPI 2.0+ fields
     pub length: u32,
     pub xsdt_address: u64,
@@ -30,8 +22,8 @@ pub struct RsdpDescriptor {
     pub reserved: [u8; 3],
 }
 
-/// Hardware discovery results
-#[derive(Debug)]
+/// Hardware discovery results suitable for kernel handoff
+#[derive(Debug, Default)]
 pub struct HardwareInfo {
     pub acpi_available: bool,
     pub rsdp_address: Option<u64>,
@@ -43,399 +35,174 @@ pub struct HardwareInfo {
     pub graphics_devices: usize,
 }
 
-impl Default for HardwareInfo {
-    fn default() -> Self {
-        Self {
-            acpi_available: false,
-            rsdp_address: None,
-            cpu_count: 1,
-            memory_size: 0,
-            pci_devices: 0,
-            storage_devices: 0,
-            network_interfaces: 0,
-            graphics_devices: 0,
-        }
-    }
-}
-
-/// Comprehensive hardware discovery
 pub fn discover_system_hardware(system_table: &mut SystemTable<Boot>) -> HardwareInfo {
     let mut hardware = HardwareInfo::default();
+    let _ = system_table.stdout().output_string(cstr16!("=== HW Discovery ===\r\n"));
 
-    system_table
-        .stdout()
-        .output_string(cstr16!("=== Advanced Hardware Discovery ===\r\n"))
-        .unwrap_or(());
-
-    // ACPI Discovery
-    if let Some(rsdp_addr) = discover_acpi_tables(system_table) {
-        hardware.acpi_available = true;
-        hardware.rsdp_address = Some(rsdp_addr);
-        system_table
-            .stdout()
-            .output_string(cstr16!("   [SUCCESS] ACPI tables found\r\n"))
-            .unwrap_or(());
-        log_info("acpi", "ACPI support available");
-
-        // Parse CPU information from ACPI
-        hardware.cpu_count = get_cpu_count_from_acpi(rsdp_addr);
+    // ACPI RSDP discovery
+    hardware.rsdp_address = discover_acpi_rsdp(system_table);
+    hardware.acpi_available = hardware.rsdp_address.is_some();
+    if hardware.acpi_available {
+        log_info("acpi", "ACPI RSDP found");
     } else {
-        system_table
-            .stdout()
-            .output_string(cstr16!("   [WARN] ACPI tables not found\r\n"))
-            .unwrap_or(());
-        log_warn("acpi", "ACPI tables not available");
+        log_warn("acpi", "ACPI RSDP not found");
     }
 
-    // Memory discovery
-    hardware.memory_size = discover_memory_topology(system_table);
+    // Memory size
+    hardware.memory_size = discover_memory_size(system_table);
+    log_info("memory", &format!("Total RAM: {} MiB", hardware.memory_size / (1024*1024)));
+
+    // CPU count (MADT parsing if ACPI available, fallback otherwise)
+    hardware.cpu_count = if let Some(rsdp) = hardware.rsdp_address {
+        get_cpu_count_from_acpi(rsdp)
+    } else { 1 };
 
     // Device enumeration
-    hardware.storage_devices = enumerate_storage_devices(system_table);
-    hardware.network_interfaces = enumerate_network_devices(system_table);
-    hardware.graphics_devices = enumerate_graphics_devices(system_table);
-    hardware.pci_devices = enumerate_pci_devices(system_table);
+    hardware.storage_devices = enumerate_storage(system_table);
+    hardware.network_interfaces = enumerate_network(system_table);
+    hardware.graphics_devices = enumerate_graphics(system_table);
+    hardware.pci_devices = enumerate_pci(system_table);
 
-    // CPU features detection
-    detect_cpu_features(system_table);
+    // CPU features (NXE, SMEP, SMAP, UMIP)
+    let cpu_flags = detect_cpu_features();
 
-    // Display summary
+    log_info("cpu", &format!("CPU features: NXE={} SMEP={} SMAP={} UMIP={}",
+        cpu_flags.nxe, cpu_flags.smep, cpu_flags.smap, cpu_flags.umip));
+
     display_hardware_summary(&hardware, system_table);
 
-    log_info("hardware", "Comprehensive hardware discovery completed");
     hardware
 }
 
-/// Discover ACPI tables by searching for RSDP
-fn discover_acpi_tables(system_table: &mut SystemTable<Boot>) -> Option<u64> {
-    let config_table = system_table.config_table();
-
-    // Look for ACPI 2.0 table first
-    for entry in config_table {
-        if entry.guid == uefi::table::cfg::ACPI2_GUID {
+fn discover_acpi_rsdp(system_table: &mut SystemTable<Boot>) -> Option<u64> {
+    for entry in system_table.config_table() {
+        if entry.guid == uefi::table::cfg::ACPI2_GUID || entry.guid == uefi::table::cfg::ACPI_GUID {
             let rsdp_ptr = entry.address as u64;
             if validate_rsdp(rsdp_ptr) {
-                log_info("acpi", "ACPI 2.0 RSDP found");
                 return Some(rsdp_ptr);
             }
         }
     }
-
-    // Fall back to ACPI 1.0
-    for entry in config_table {
-        if entry.guid == uefi::table::cfg::ACPI_GUID {
-            let rsdp_ptr = entry.address as u64;
-            if validate_rsdp(rsdp_ptr) {
-                log_info("acpi", "ACPI 1.0 RSDP found");
-                return Some(rsdp_ptr);
-            }
-        }
-    }
-
     None
 }
 
-/// Validate RSDP checksum and signature
 fn validate_rsdp(rsdp_address: u64) -> bool {
     unsafe {
         let rsdp = &*(rsdp_address as *const RsdpDescriptor);
-
-        // Check signature
-        if &rsdp.signature != b"RSD PTR " {
-            return false;
-        }
-
-        // Basic checksum validation for ACPI 1.0 part
+        if &rsdp.signature != b"RSD PTR " { return false; }
         let bytes = core::slice::from_raw_parts(rsdp_address as *const u8, 20);
         let sum: u8 = bytes.iter().fold(0, |acc, &b| acc.wrapping_add(b));
-
         sum == 0
     }
 }
 
-/// Extract CPU count from ACPI tables
+// Kernel should parse MADT table for true count; here we fallback to 1 for safety.
 fn get_cpu_count_from_acpi(_rsdp_address: u64) -> usize {
-    // This would require full ACPI parsing - simplified for now
-    // In a real implementation, we'd parse the MADT (APIC) table
-    log_debug("acpi", "CPU count extraction not yet implemented");
-    1 // Default to 1 CPU
+    // Next development: parse MADT table for APIC count
+    log_debug("acpi", "MADT parsing for CPU count not implemented; defaulting to 1");
+    1
 }
 
-/// Discover memory topology and size
-fn discover_memory_topology(system_table: &mut SystemTable<Boot>) -> u64 {
+fn discover_memory_size(system_table: &mut SystemTable<Boot>) -> u64 {
     let bs = system_table.boot_services();
-    let memory_map_size = bs.memory_map_size();
-    let buffer_size = memory_map_size.map_size + (memory_map_size.entry_size * 8);
-
-    if let Ok(buffer_ptr) = bs.allocate_pages(
+    let map = bs.memory_map_size();
+    let buf_size = map.map_size + (map.entry_size * 8);
+    if let Ok(ptr) = bs.allocate_pages(
         uefi::table::boot::AllocateType::AnyPages,
         uefi::table::boot::MemoryType::LOADER_DATA,
-        buffer_size.div_ceil(4096),
+        buf_size.div_ceil(4096),
     ) {
-        let buffer = unsafe { core::slice::from_raw_parts_mut(buffer_ptr as *mut u8, buffer_size) };
-
-        if let Ok(memory_map) = bs.memory_map(buffer) {
-            let mut total_memory = 0u64;
-
-            for desc in memory_map.entries() {
-                total_memory += desc.page_count * 4096;
-            }
-
-            let _ = bs.free_pages(buffer_ptr, buffer_size.div_ceil(4096));
-            system_table
-                .stdout()
-                .output_string(cstr16!("   [SUCCESS] Memory topology analyzed\r\n"))
-                .unwrap_or(());
-
-            return total_memory;
+        let buf = unsafe { core::slice::from_raw_parts_mut(ptr as *mut u8, buf_size) };
+        if let Ok(mem_map) = bs.memory_map(buf) {
+            let total = mem_map.entries().map(|desc| desc.page_count * 4096).sum();
+            let _ = bs.free_pages(ptr, buf_size.div_ceil(4096));
+            return total;
         }
-
-        let _ = bs.free_pages(buffer_ptr, buffer_size.div_ceil(4096));
+        let _ = bs.free_pages(ptr, buf_size.div_ceil(4096));
     }
-
-    system_table
-        .stdout()
-        .output_string(cstr16!("   [WARN] Memory topology analysis failed\r\n"))
-        .unwrap_or(());
     0
 }
 
-/// Enumerate storage devices
-fn enumerate_storage_devices(system_table: &mut SystemTable<Boot>) -> usize {
+// Storage: BlockIO
+fn enumerate_storage(system_table: &mut SystemTable<Boot>) -> usize {
     let bs = system_table.boot_services();
-    let mut count = 0;
-
-    // Block I/O devices
-    if let Ok(handles) = bs.find_handles::<uefi::proto::media::block::BlockIO>() {
-        count += handles.len();
-    }
-
-    // File system devices
-    if let Ok(handles) = bs.find_handles::<uefi::proto::media::fs::SimpleFileSystem>() {
-        // Don't double count - these might overlap with BlockIO
-        for _handle in handles {
-            // Additional file system specific detection could go here
-        }
-    }
-
-    if count > 0 {
-        system_table
-            .stdout()
-            .output_string(cstr16!("   [SUCCESS] Storage devices enumerated\r\n"))
-            .unwrap_or(());
-        log_info("storage", "Storage devices detected");
-    }
-
+    let count = bs.find_handles::<uefi::proto::media::block::BlockIO>().map(|h| h.len()).unwrap_or(0);
+    log_info("storage", &format!("Storage devices: {}", count));
     count
 }
 
-/// Enumerate network devices
-fn enumerate_network_devices(system_table: &mut SystemTable<Boot>) -> usize {
+// Network: SNP
+fn enumerate_network(system_table: &mut SystemTable<Boot>) -> usize {
     let bs = system_table.boot_services();
-    let mut count = 0;
-
-    // Simple Network Protocol
-    if let Ok(handles) = bs.find_handles::<uefi::proto::network::snp::SimpleNetwork>() {
-        count += handles.len();
-    }
-
-    // Additional network protocols would be checked here in a full implementation
-
-    if count > 0 {
-        system_table
-            .stdout()
-            .output_string(cstr16!("   [SUCCESS] Network interfaces enumerated\r\n"))
-            .unwrap_or(());
-        log_info("network", "Network interfaces detected");
-    }
-
+    let count = bs.find_handles::<uefi::proto::network::snp::SimpleNetwork>().map(|h| h.len()).unwrap_or(0);
+    log_info("network", &format!("Network interfaces: {}", count));
     count
 }
 
-/// Enumerate graphics devices
-fn enumerate_graphics_devices(system_table: &mut SystemTable<Boot>) -> usize {
+// Graphics: GOP
+fn enumerate_graphics(system_table: &mut SystemTable<Boot>) -> usize {
     let bs = system_table.boot_services();
-    let mut count = 0;
-
-    if let Ok(handles) = bs.find_handles::<uefi::proto::console::gop::GraphicsOutput>() {
-        count += handles.len();
-    }
-
-    if count > 0 {
-        system_table
-            .stdout()
-            .output_string(cstr16!("   [SUCCESS] Graphics devices enumerated\r\n"))
-            .unwrap_or(());
-        log_info("graphics", "Graphics devices detected");
-    }
-
+    let count = bs.find_handles::<uefi::proto::console::gop::GraphicsOutput>().map(|h| h.len()).unwrap_or(0);
+    log_info("graphics", &format!("Graphics devices: {}", count));
     count
 }
 
-/// Enumerate PCI devices (simplified)
-fn enumerate_pci_devices(system_table: &mut SystemTable<Boot>) -> usize {
+// PCI: DevicePath but parsing is deferred to kernel
+fn enumerate_pci(system_table: &mut SystemTable<Boot>) -> usize {
     let bs = system_table.boot_services();
-    let mut count = 0;
-
-    // PCI Root Bridge I/O Protocol
-    if let Ok(handles) = bs.find_handles::<uefi::proto::device_path::DevicePath>() {
-        // This is a simplified count - real PCI enumeration would require
-        // parsing the device paths and looking for PCI-specific ones
-        count = handles.len();
-    }
-
-    if count > 0 {
-        system_table
-            .stdout()
-            .output_string(cstr16!("   [SUCCESS] PCI devices enumerated\r\n"))
-            .unwrap_or(());
-        log_info("pci", "PCI devices detected");
-    }
-
+    let count = bs.find_handles::<uefi::proto::device_path::DevicePath>().map(|h| h.len()).unwrap_or(0);
+    log_info("pci", &format!("PCI devices: {}", count));
     count
 }
 
-/// Detect CPU features using CPUID instruction
-fn detect_cpu_features(system_table: &mut SystemTable<Boot>) {
-    system_table
-        .stdout()
-        .output_string(cstr16!("   [INFO] CPU feature detection\r\n"))
-        .unwrap_or(());
+// CPU features: NXE, SMEP, SMAP, UMIP
+#[derive(Default)]
+pub struct CpuFeatureFlags { pub nxe: bool, pub smep: bool, pub smap: bool, pub umip: bool }
 
+pub fn detect_cpu_features() -> CpuFeatureFlags {
     #[cfg(target_arch = "x86_64")]
     unsafe {
-        // Check for basic CPUID support
-        if has_cpuid() {
-            let (_eax, _ebx, ecx, _edx) = cpuid(0);
-
-            // Check various CPU features
-            if ecx & (1 << 0) != 0 {
-                // SSE3
-                log_debug("cpu", "SSE3 supported");
-            }
-            if ecx & (1 << 9) != 0 {
-                // SSSE3
-                log_debug("cpu", "SSSE3 supported");
-            }
-            if ecx & (1 << 19) != 0 {
-                // SSE4.1
-                log_debug("cpu", "SSE4.1 supported");
-            }
-            if ecx & (1 << 20) != 0 {
-                // SSE4.2
-                log_debug("cpu", "SSE4.2 supported");
-            }
-            if ecx & (1 << 28) != 0 {
-                // AVX
-                log_debug("cpu", "AVX supported");
-            }
-
-            // Check for security features
-            let (_, _, _ecx_ext, edx_ext) = cpuid(0x80000001);
-            if edx_ext & (1 << 20) != 0 {
-                // NX bit
-                log_debug("cpu", "NX bit supported");
-            }
-        }
+        let mut flags = CpuFeatureFlags::default();
+        // CPUID: leaf 0x80000001, EDX[20] = NX
+        let (_, _, _, edx) = cpuid(0x80000001);
+        flags.nxe = (edx & (1 << 20)) != 0;
+        // CPUID: leaf 7, EBX[7]=SMEP EBX[20]=SMAP EBX[2]=UMIP
+        let (_, ebx, _, _) = cpuid(7);
+        flags.smep = (ebx & (1 << 7)) != 0;
+        flags.smap = (ebx & (1 << 20)) != 0;
+        flags.umip = (ebx & (1 << 2)) != 0;
+        flags
     }
-
-    system_table
-        .stdout()
-        .output_string(cstr16!("   [SUCCESS] CPU features analyzed\r\n"))
-        .unwrap_or(());
-    log_info("cpu", "CPU feature detection completed");
+    #[cfg(not(target_arch = "x86_64"))]
+    { CpuFeatureFlags::default() }
 }
 
-/// Check if CPUID instruction is available
-#[cfg(target_arch = "x86_64")]
-unsafe fn has_cpuid() -> bool {
-    // This is a simplified check - real implementation would test EFLAGS.ID
-    true
-}
-
-/// Execute CPUID instruction
 #[cfg(target_arch = "x86_64")]
 unsafe fn cpuid(leaf: u32) -> (u32, u32, u32, u32) {
     let mut eax: u32;
     let mut ebx: u32;
-    let mut ecx: u32 = 0; // Initialize ECX to 0
+    let mut ecx: u32;
     let mut edx: u32;
-
-    // Save and restore rbx since it's used internally by LLVM
     core::arch::asm!(
-        "push rbx",
         "cpuid",
-        "mov {ebx_out:e}, ebx",
-        "pop rbx",
-        ebx_out = out(reg) ebx,
         inout("eax") leaf => eax,
-        inout("ecx") ecx,
-        out("edx") edx,
-        options(preserves_flags)
+        lateout("ebx") ebx,
+        lateout("ecx") ecx,
+        lateout("edx") edx,
+        options(nostack, preserves_flags)
     );
-
     (eax, ebx, ecx, edx)
 }
 
-/// Display comprehensive hardware summary
-fn display_hardware_summary(hardware: &HardwareInfo, system_table: &mut SystemTable<Boot>) {
-    system_table
-        .stdout()
-        .output_string(cstr16!("\r\n=== Hardware Summary ===\r\n"))
-        .unwrap_or(());
-
-    if hardware.acpi_available {
-        system_table
-            .stdout()
-            .output_string(cstr16!("ACPI:              Available\r\n"))
-            .unwrap_or(());
-    } else {
-        system_table
-            .stdout()
-            .output_string(cstr16!("ACPI:              Not Available\r\n"))
-            .unwrap_or(());
-    }
-
-    // Memory size in MB
-    let memory_mb = hardware.memory_size / (1024 * 1024);
-    if memory_mb > 0 {
-        // For now, just show that memory was detected - proper formatting would require string manipulation
-        system_table
-            .stdout()
-            .output_string(cstr16!("Memory:            Detected\r\n"))
-            .unwrap_or(());
-    }
-
-    if hardware.cpu_count > 0 {
-        system_table
-            .stdout()
-            .output_string(cstr16!("CPUs:              Detected\r\n"))
-            .unwrap_or(());
-    }
-
-    if hardware.storage_devices > 0 {
-        system_table
-            .stdout()
-            .output_string(cstr16!("Storage:           Available\r\n"))
-            .unwrap_or(());
-    }
-
-    if hardware.network_interfaces > 0 {
-        system_table
-            .stdout()
-            .output_string(cstr16!("Network:           Available\r\n"))
-            .unwrap_or(());
-    }
-
-    if hardware.graphics_devices > 0 {
-        system_table
-            .stdout()
-            .output_string(cstr16!("Graphics:          Available\r\n"))
-            .unwrap_or(());
-    }
-
-    system_table
-        .stdout()
-        .output_string(cstr16!("========================\r\n\r\n"))
-        .unwrap_or(());
+fn display_hardware_summary(h: &HardwareInfo, system_table: &mut SystemTable<Boot>) {
+    let _ = system_table.stdout().output_string(cstr16!("=== HW Summary ===\r\n"));
+    let _ = system_table.stdout().output_string(if h.acpi_available { cstr16!("ACPI: available\r\n") } else { cstr16!("ACPI: not found\r\n") });
+    let _ = system_table.stdout().output_string(cstr16!("Memory (MiB): "));
+    let _ = system_table.stdout().output_string(cstr16!("Memory: "));
+    let _ = system_table.stdout().output_string(cstr16!("CPUs: "));
+    let _ = system_table.stdout().output_string(cstr16!("Storage: "));
+    let _ = system_table.stdout().output_string(cstr16!("Network: "));
+    let _ = system_table.stdout().output_string(cstr16!("Graphics: "));
+    let _ = system_table.stdout().output_string(cstr16!("PCI: "));
+    let _ = system_table.stdout().output_string(cstr16!("==============\r\n\r\n"));
 }
