@@ -1,7 +1,7 @@
 # zk-embed (host-side)
 
-Author: eK (team@nonos.systems) — https://nonos.systems  Unite, we win.
-License: AGPL-3.0
+**Author:** eK (team@nonos.systems) — https://nonos.systems   unite, we win.
+**License:** AGPL-3.0
 
 A small, precise host tool that derives your PROGRAM_HASH and normalizes your Groth16 verifying key (VK) into canonical compressed bytes for embedding in the NØNOS bootloader.
 
@@ -26,9 +26,9 @@ A small, precise host tool that derives your PROGRAM_HASH and normalizes your Gr
 
 zk-embed does three things:
 
-1) Accepts your program/circuit ID (string, hex, or raw file).  
-2) Derives a 32-byte PROGRAM_HASH using BLAKE3 with a domain separator.  
-3) Loads your Groth16 VK (BLS12‑381), validates it, and re‑serializes to arkworks canonical compressed bytes.
+1. Accepts your program/circuit ID (string, hex, or raw file)
+2. Derives a 32-byte PROGRAM_HASH using BLAKE3 with a domain separator
+3. Loads your Groth16 VK (BLS12‑381), validates it, and re‑serializes to arkworks canonical compressed bytes
 
 It then prints ready-to-paste Rust consts and a mapping snippet for the bootloader’s ZK verifier registry.
 
@@ -37,13 +37,26 @@ It then prints ready-to-paste Rust consts and a mapping snippet for the bootload
 ## Diagram
 
 ```mermaid
-flowchart LR
-    A[Program/Circuit ID\n(str | hex | file)] --> B[Derive PROGRAM_HASH\nBLAKE3 derive_key\nDS: NONOS:ZK:PROGRAM:v1]
-    C[Verifying Key bytes\ncompressed or uncompressed\narkworks CanonicalSerialize] --> D[Deserialize VK\n(try compressed, else uncompressed)]
-    D --> E[Re-serialize VK\ncanonical compressed]
-    B --> F[Emit Rust consts + mapping]
-    E --> F
-    F --> G[Paste into bootloader\nsrc/zk/zkverify.rs]
+flowchart TD
+    A[Program/Circuit ID bytes<br/>str | hex | file] --> B[BLAKE3::derive_key<br/>NONOS:ZK:PROGRAM:v1]
+    C[Verifying Key bytes<br/>arkworks compressed OR uncompressed] --> D[Deserialize VK<br/>try compressed else uncompressed]
+    
+    B --> E[PROGRAM_HASH<br/>32 bytes]
+    D --> F[Reserialize to<br/>canonical compressed bytes]
+    
+    E --> G[Rust consts + registry mapping]
+    F --> G
+    
+    G --> H[- PROGRAM_HASH_PREFIX<br/>- VK_PREFIX_BLS12_381_GROTH16<br/>- program_vk_lookup snippet]
+    
+    H --> I[Paste into boot/src/zk/zkverify.rs<br/>and build]
+    
+    style A fill:#e1f5fe
+    style C fill:#e1f5fe
+    style E fill:#f3e5f5
+    style F fill:#f3e5f5
+    style G fill:#e8f5e8
+    style I fill:#fff3e0
 ```
 
 ---
@@ -113,7 +126,7 @@ What it prints:
 
 ## End-to-end example
 
-1) Generate a snippet:
+### 1. Generate a snippet
 
 ```bash
 cargo run --release -p zk-embed -- \
@@ -123,14 +136,18 @@ cargo run --release -p zk-embed -- \
   --out zk_embed_out.rs
 ```
 
-2) Inspect the output file `zk_embed_out.rs`:
+### 2. Inspect the output file
+
+Inspect the output file `zk_embed_out.rs`:
 
 - It contains:
   - A 32-byte `PROGRAM_HASH_ATTEST_V1`
   - A byte slice `VK_ATTEST_V1_BLS12_381_GROTH16` with canonical compressed VK bytes
   - A mapping function that ties the program hash to the VK slice
 
-3) Paste those consts and the mapping into your bootloader at:
+### 3. Paste into bootloader
+
+Paste those consts and the mapping into your bootloader at:
 
 ```
 src/zk/zkverify.rs
@@ -201,4 +218,6 @@ Feature policy:
 
 ---
 
-Community: team@nonos.systems • https://nonos.systems
+---
+
+**Community:** team@nonos.systems • https://nonos.systems
