@@ -1,3 +1,5 @@
+//! ZK error taxonomy 
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ZkError {
     ProofTooLarge,
@@ -15,6 +17,8 @@ pub enum ZkError {
     BackendVerifyFailed,
     BackendUnsupported,
     Internal,
+    ProofSizeInvalid,
+    InputsCountMismatch,
     SectionTooSmall,
     HeaderTruncated,
     OffsetRange,
@@ -40,6 +44,8 @@ impl ZkError {
             BackendVerifyFailed => "zk: groth16 verify failed",
             BackendUnsupported => "zk: no backend (enable zk-groth16)",
             Internal => "zk: internal error",
+            ProofSizeInvalid => "zk: proof size invalid",
+            InputsCountMismatch => "zk: public inputs count mismatch",
             SectionTooSmall => "zk: section too small",
             HeaderTruncated => "zk: header truncated",
             OffsetRange => "zk: offset range invalid",
