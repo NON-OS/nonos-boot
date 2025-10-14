@@ -36,35 +36,30 @@ It then prints ready-to-paste Rust consts and a mapping snippet for the bootload
 
 ## Diagram
 
-┌─────────────────────────┐       ┌─────────────────────────────────┐
-│ Program/Circuit ID      │       │ Verifying Key bytes             │
-│ (str │ hex │ file)      │       │ (arkworks compressed/uncomp.)   │
-└────────────┬────────────┘       └─────────────┬───────────────────┘
-             │                                  │
-             │ BLAKE3::derive_key               │
-             │ "NONOS:ZK:PROGRAM:v1"            │
-             ▼                                  ▼
-    ┌─────────────────┐                ┌─────────────────────┐
-    │ PROGRAM_HASH    │                │ Deserialize VK      │
-    │ [32 bytes]      │                │ (try compressed     │
-    └─────────┬───────┘                │  else uncompressed) │
-              │                        └──────────┬──────────┘
-              │                                   │
-              │                                   │ reserialize to
-              │                                   │ canonical compressed
-              │                                   ▼
-              └─────────────────┬─────────────────────────────────────┐
-                                │                                     │
-                                ▼                                     │
-                    ┌──────────────────────────────────────────────────┴──┐
-                    │ Rust consts + registry mapping                      │
-                    │  • PROGRAM_HASH_<PREFIX>                            │
-                    │  • VK_<PREFIX>_BLS12_381_GROTH16                    │
-                    │  • program_vk_lookup() snippet                      │
-                    └─────────────────────────┬───────────────────────────┘
-                                              │
-                                              ▼
-                            📁 Paste into boot/src/zk/zkverify.rs and build
+```
+INPUTS:
+  Program/Circuit ID           Verifying Key bytes
+  (str | hex | file)    +      (arkworks format)
+           |                         |
+           v                         v
+    BLAKE3::derive_key         Deserialize VK
+    "NONOS:ZK:PROGRAM:v1"      (compressed/uncompressed)
+           |                         |
+           v                         v
+    PROGRAM_HASH              Reserialize to canonical
+    [32 bytes]                compressed bytes
+           |                         |
+           +------------+------------+
+                        |
+                        v
+             Rust consts + registry mapping:
+             - PROGRAM_HASH_<PREFIX>
+             - VK_<PREFIX>_BLS12_381_GROTH16  
+             - program_vk_lookup() snippet
+                        |
+                        v
+         Paste into boot/src/zk/zkverify.rs and build
+```
 
 ---
 
@@ -228,4 +223,3 @@ Feature policy:
 ---
 
 **Community:** team@nonos.systems • https://nonos.systems
-
