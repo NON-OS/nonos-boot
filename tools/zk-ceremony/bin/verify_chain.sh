@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Verify a chain of PoT transcripts and optionally contribution logs
 set -euo pipefail
 
 POWERSOFTAU="${POWERSOFTAU:-powersoftau}"
@@ -9,7 +10,7 @@ ROOT_PUBKEY=""
 usage() {
   cat <<EOF
 verify_chain.sh --root <base.ptau> --chain <next.ptau> [next2.ptau ...] [--log-dir <dir>] [--root-pubkey <path>]
-Verifies the sequence of transcripts using powersoftau verify. Optionally validates signed logs.
+Verifies the sequence of transcripts and optionally validates contribution logs signatures.
 EOF
   exit 1
 }
@@ -34,10 +35,13 @@ if [[ -z "${ROOT}" || "${#CHAIN[@]}" -eq 0 ]]; then
   usage
 fi
 
+command -v "${POWERSOFTAU}" >/dev/null 2>&1 || { echo "powersoftau binary not found"; exit 1; }
+command -v jq >/dev/null 2>&1 || { echo "jq required"; exit 1; }
+
 echo "[verify_chain] root: ${ROOT}"
 PREV="${ROOT}"
 for CUR in "${CHAIN[@]}"; do
-  echo "[verify_chain] validating ${CUR} against ${PREV}"
+  echo "[verify_chain] verifying ${CUR} against ${PREV}"
   "${POWERSOFTAU}" verify --input "${CUR}" --previous "${PREV}" || { echo "Verification failed for ${CUR}"; exit 2; }
   echo "[verify_chain] ok: ${CUR}"
   PREV="${CUR}"
@@ -49,11 +53,11 @@ if [[ -n "${LOGDIR}" ]]; then
     [ -e "$logf" ] || continue
     echo " - ${logf}"
     if [[ -n "${ROOT_PUBKEY}" && -f "${logf}.sig" ]]; then
-      if command -v ed25519verify >/dev/null 2>&1; then
-        ed25519verify --pub "${ROOT_PUBKEY}" --sig "${logf}.sig" --in "${logf}" || { echo "log signature verification failed for ${logf}"; exit 3; }
+      if command -v ./target/release/ed25519verify >/dev/null 2>&1; then
+        ./target/release/ed25519verify --pub "${ROOT_PUBKEY}" --in "${logf}" --sig "${logf}.sig" || { echo "log signature verification failed for ${logf}"; exit 3; }
         echo "   signature ok"
       else
-        echo "   signature present but no ed25519verify tool; manual check advised"
+        echo "   signature present but ed25519verify not installed; manual verification required"
       fi
     fi
   done
