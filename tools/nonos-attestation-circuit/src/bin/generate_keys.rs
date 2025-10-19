@@ -1,6 +1,6 @@
-//! Groth16 key operations for NONOS attestation circuit
+//! Groth16 key operations for NONOS attestation circuit.
 
-use std::{fs, fs::File, io::Write, path::PathBuf, process::Command, time::SystemTime};
+use std::{fs, fs::File, io::Write, path::PathBuf, process::Command};
 
 use ark_bls12_381::{Bls12_381, Fr};
 use ark_groth16::{Groth16, ProvingKey, VerifyingKey};
@@ -13,6 +13,7 @@ use clap::{Parser, Subcommand};
 use serde::{Deserialize, Serialize};
 use hex::ToHex;
 use chrono::Utc;
+use serde_json::Value as JsonValue;
 
 use nonos_attestation_circuit::{expected_program_hash_bytes, NonosAttestationCircuit};
 
@@ -39,13 +40,15 @@ enum Cmd {
         #[arg(long = "sign-key", value_name = "PATH")]
         sign_key: Option<PathBuf>,
 
-        /// Default: attestation_bundle.tar.gz
         #[arg(long = "bundle-out", value_name = "PATH")]
         bundle_out: Option<PathBuf>,
 
         /// If set, produce metadata.json but do NOT sign the bundle (for test/dev).
         #[arg(long = "allow-unsigned", action = clap::ArgAction::SetTrue)]
         allow_unsigned: bool,
+
+        #[arg(long = "ceremony-dir", value_name = "DIR")]
+        ceremony_dir: Option<PathBuf>,
     },
 
     /// Extract a verifying key (VK) from a proving key (PK)
@@ -57,7 +60,6 @@ enum Cmd {
         out: PathBuf,
     },
 
-    /// Inspect a verifying key and print metadata/fingerprint
     InspectVk {
         #[arg(long, value_name = "PATH")]
         vk: PathBuf,
@@ -76,6 +78,11 @@ struct Metadata {
     public_inputs_expected: usize,
     canonical_vk_len: usize,
     generated_at_utc: String,
+    // optional ceremony provenance block
+    #[serde(skip_serializing_if = "Option::is_none")]
+    ceremony: Option<JsonValue>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    contributors: Option<Vec<JsonValue>>,
 }
 
 fn main() -> Result<(), String> {
@@ -88,6 +95,7 @@ fn main() -> Result<(), String> {
             sign_key,
             bundle_out,
             allow_unsigned,
+            ceremony_dir,
         } => {
             let out_dir = PathBuf::from(output);
             if !out_dir.exists() {
@@ -97,12 +105,12 @@ fn main() -> Result<(), String> {
             let seed_u64 = parse_seed(&seed);
             let mut rng = StdRng::seed_from_u64(seed_u64);
 
-            // Circuit with default witness; only shape needs for VK.
+            // Circuit with default witness; only the shape matters for VK.
             let circuit: NonosAttestationCircuit<Fr> = Default::default();
             let (pk, vk) = Groth16::<Bls12_381>::circuit_specific_setup(circuit, &mut rng)
                 .map_err(|e| format!("setup: {e}"))?;
 
-            // Serialize (canonical compressed) + write
+            // Serialize (canonical compressed) and write
             let mut pk_bytes = Vec::new();
             pk.serialize_with_mode(&mut pk_bytes, Compress::Yes)
                 .map_err(|e| format!("pk serialize: {e}"))?;
@@ -126,7 +134,14 @@ fn main() -> Result<(), String> {
             let rustc_version = get_rustc_version();
             let cargo_version = get_cargo_version();
             let commit = std::env::var("GIT_COMMIT").ok().or_else(|| git_commit_hash());
-            let ts = Utc::now().to_rfc3339();
+            let ts = chrono::Utc::now().to_rfc3339();
+
+            // Read ceremony dir and include contributors & ceremony metadata
+            let (ceremony_json, contributors) = if let Some(dir) = ceremony_dir {
+                read_ceremony_dir(&dir)?
+            } else {
+                (None, None)
+            };
 
             let metadata = Metadata {
                 tool,
@@ -139,6 +154,8 @@ fn main() -> Result<(), String> {
                 public_inputs_expected: inputs,
                 canonical_vk_len: vk_bytes.len(),
                 generated_at_utc: ts,
+                ceremony: ceremony_json,
+                contributors,
             };
 
             let metadata_json = serde_json::to_vec_pretty(&metadata).map_err(|e| format!("metadata json: {e}"))?;
@@ -155,21 +172,19 @@ fn main() -> Result<(), String> {
                 println!("program_hash_hex: {}", hex::encode(ph));
             }
 
-            // Bundle creation: tar.gz contains: attestation_verifying_key.bin, metadata.json, signature.sig
+            // Bundle creation: tar.gz [verifying_key.bin, metadata.json, signature.sig]
             let bundle_path = bundle_out.unwrap_or_else(|| out_dir.join("attestation_bundle.tar.gz"));
-
-            // Sign if sign_key supplied
-            let signature_path = out_dir.join("signature.sig");
-            if let Some(sign_key_path) = sign_key {
-                let sig = sign_bundle(&sign_key_path, &vk_bytes, &metadata_json)?;
-                write_bin(&signature_path, &sig)?;
-                create_bundle(&bundle_path, &vk_path, &out_dir.join("metadata.json"), &signature_path)?;
+            if sign_key.is_some() {
+                // Sign concatenation: vk_bytes || metadata_json
+                let sig = sign_bundle(sign_key.as_ref().unwrap(), &vk_bytes, &metadata_json)?;
+                // write signature file
+                write_bin(&out_dir.join("signature.sig"), &sig)?;
+                // Create tar.gz bundle
+                create_bundle(&bundle_path, &vk_path, &out_dir.join("metadata.json"), &out_dir.join("signature.sig"))?;
                 println!("signed bundle written: {}", bundle_path.display());
             } else if allow_unsigned {
                 // create bundle without signature
-                // Create an empty signature file to keep layout
-                let _ = write_bin(&signature_path, &[]); // zero-length
-                create_bundle(&bundle_path, &vk_path, &out_dir.join("metadata.json"), &signature_path)?;
+                create_bundle(&bundle_path, &vk_path, &out_dir.join("metadata.json"), &PathBuf::from(""))?;
                 println!("unsigned bundle written: {}", bundle_path.display());
             } else {
                 println!("No signing key provided; bundle not signed. Use --sign-key to produce signed bundle or --allow-unsigned for test builds.");
@@ -214,7 +229,36 @@ fn main() -> Result<(), String> {
     }
 }
 
+fn read_ceremony_dir(dir: &PathBuf) -> Result<(Option<JsonValue>, Option<Vec<JsonValue>>), String> {
+    if !dir.exists() {
+        return Ok((None, None));
+    }
+    let mut contributors = Vec::new();
+    let mut ceremony_meta: Option<JsonValue> = None;
+    for entry in fs::read_dir(dir).map_err(|e| format!("read ceremony dir: {e}"))? {
+        let p = entry.map_err(|e| format!("read dir entry: {e}"))?.path();
+        if p.is_file() {
+            if let Some(name) = p.file_name().and_then(|s| s.to_str()) {
+                if name.ends_with(".json") {
+                    let b = fs::read(&p).map_err(|e| format!("read ceremony file: {e}"))?;
+                    let v: JsonValue = serde_json::from_slice(&b).map_err(|e| format!("parse json: {e}"))?;
+                    // If file is named "ceremony.json" treat as ceremony metadata, else contributor
+                    if name == "ceremony.json" {
+                        ceremony_meta = Some(v);
+                    } else {
+                        contributors.push(v);
+                    }
+                }
+            }
+        }
+    }
+    Ok((ceremony_meta, if contributors.is_empty() { None } else { Some(contributors) }))
+}
+
 fn write_bin(path: &PathBuf, bytes: &[u8]) -> Result<(), String> {
+    if path.as_os_str().is_empty() {
+        return Err("empty path".into());
+    }
     if let Some(parent) = path.parent() {
         if !parent.as_os_str().is_empty() {
             fs::create_dir_all(parent).map_err(|e| format!("mkdir {}: {e}", parent.display()))?;
@@ -335,10 +379,8 @@ fn create_bundle(bundle_out: &PathBuf, vk_path: &PathBuf, metadata_path: &PathBu
 }
 
 fn sign_bundle(sign_key_path: &PathBuf, vk_bytes: &[u8], metadata_json: &[u8]) -> Result<Vec<u8>, String> {
-    use ed25519_dalek::{Keypair, Signature, Signer, SECRET_KEY_LENGTH, KEYPAIR_LENGTH, PUBLIC_KEY_LENGTH};
+    use ed25519_dalek::{Keypair, Signature, Signer, SECRET_KEY_LENGTH, KEYPAIR_LENGTH};
     let key_bytes = fs::read(sign_key_path).map_err(|e| format!("read sign key: {e}"))?;
-
-    // Accept 64-byte keypair, or 32-byte seed secret
     let kp = if key_bytes.len() == KEYPAIR_LENGTH {
         Keypair::from_bytes(&key_bytes).map_err(|e| format!("keypair parse: {e}"))?
     } else if key_bytes.len() == SECRET_KEY_LENGTH {
@@ -364,7 +406,7 @@ fn sign_bundle(sign_key_path: &PathBuf, vk_bytes: &[u8], metadata_json: &[u8]) -
         }
     };
 
-    // vk_bytes || metadata_json
+    // Sign concatenated data: vk_bytes || metadata_json
     let mut signed_input = Vec::with_capacity(vk_bytes.len() + metadata_json.len());
     signed_input.extend_from_slice(vk_bytes);
     signed_input.extend_from_slice(metadata_json);
