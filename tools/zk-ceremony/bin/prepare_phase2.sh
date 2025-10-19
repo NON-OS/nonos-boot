@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Prepare a phase-2 file for circuit-specific setup using the final tau.
 set -euo pipefail
 
 TAU=""
@@ -8,7 +9,7 @@ POWERSOFTAU="${POWERSOFTAU:-powersoftau}"
 usage() {
   cat <<EOF
 prepare_phase2.sh --tau <final.ptau> --out <phase2.ptau> [--tool <powersoftau>]
-Prepares a phase2 transcript for circuit-specific Groth16 setup.
+Produces a phase2 transcript ready for circuit-specific Groth16 setup.
 EOF
   exit 1
 }
@@ -27,6 +28,8 @@ if [[ -z "${TAU}" || -z "${OUT}" ]]; then
   usage
 fi
 
-echo "[prepare_phase2] input=${TAU}, out=${OUT}, tool=${POWERSOFTAU}"
+command -v "${POWERSOFTAU}" >/dev/null 2>&1 || { echo "powersoftau binary not found"; exit 1; }
+
+echo "[prepare_phase2] TAU=${TAU}, OUT=${OUT}, tool=${POWERSOFTAU}"
 "${POWERSOFTAU}" prepare_phase2 --input "${TAU}" --output "${OUT}" || { echo "prepare_phase2 failed"; exit 2; }
-echo "phase2 prepared: ${OUT} (sha256: $(sha256sum "${OUT}" | awk '{print $1}'))"
+echo "phase2 prepared -> ${OUT} (sha256: $(sha256sum ${OUT} | awk '{print $1}'))"
