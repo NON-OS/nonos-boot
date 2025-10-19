@@ -1,0 +1,175 @@
+# CI workflow: ceremony end-to-end smoke test (t-of-n signers, assemble bundle, verify threshold, emit snippet)
+
+#   * Production signing must be done by real signers (HSMs / offline keys) and the CI should only verify final bundles fetched from trusted storage.
+name: Ceremony CI — end-to-end smoke test
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'tools/zk-ceremony/**'
+      - 'tools/sign-tools/**'
+      - 'tools/nonos-attestation-circuit/**'
+      - '.github/workflows/ceremony-ci.yml'
+
+permissions:
+  contents: read
+
+env:
+  OUT_DIR: out/attest
+  SEED: "42"
+  POWER: "22"
+
+jobs:
+  ceremony-e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Rust toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          override: true
+
+      - name: Cache cargo registry & target
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}-${{ env.SEED }}
+
+      - name: Install system deps
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y --no-install-recommends jq xxd docker.io python3-pip build-essential pkg-config libssl-dev
+          pip3 install pynacl blake3
+
+      - name: Build powersoftau Docker image (reproducible)
+        id: build-pot
+        run: |
+          # For production, set POWERSOFTAU_COMMIT in Dockerfile or use build-arg
+          docker build --progress=plain -t nonos/powersoftau:ci tools/zk-ceremony
+
+      - name: Build host tools (generate-keys, zk-embed, sign-tools)
+        run: |
+          cargo build --release -p nonos-attestation-circuit
+          cargo build --release -p zk-embed
+          pushd tools/sign-tools
+          cargo build --release
+          popd
+
+      - name: Prepare output directory
+        run: |
+          rm -rf ${OUT_DIR}
+          mkdir -p ${OUT_DIR}
+          ls -la .
+
+      - name: Generate deterministic VK bundle (dev/test only)
+        run: |
+          # Deterministic, unsigned bundle for smoke-test
+          ./target/release/generate-keys generate \
+            --output ${OUT_DIR} \
+            --seed ${SEED} \
+            --print-program-hash \
+            --allow-unsigned \
+            --bundle-out ${OUT_DIR}/attestation_bundle.tar.gz
+          ls -la ${OUT_DIR}
+
+      - name: Prepare signed_input for signers
+        run: |
+          # signed_input = vk || metadata
+          cp ${OUT_DIR}/attestation_verifying_key.bin ${OUT_DIR}/vk.bin
+          cp ${OUT_DIR}/metadata.json ${OUT_DIR}/metadata.json
+          cat ${OUT_DIR}/attestation_verifying_key.bin ${OUT_DIR}/metadata.json > ${OUT_DIR}/signed_input.bin
+          echo "signed_input size: $(stat -c%s ${OUT_DIR}/signed_input.bin)"
+
+      - name: Create test signer keys (N=4) and signers.json (threshold=3)
+        run: |
+          python3 - <<'PY'
+import nacl.signing, json, os
+os.makedirs("test_keys", exist_ok=True)
+pubs=[]
+n=4
+for i in range(1,n+1):
+    sk = nacl.signing.SigningKey.generate()
+    pk = sk.verify_key
+    raw_sk = sk.encode()  # 32 bytes
+    raw_pk = pk.encode()  # 32 bytes
+    open(f"test_keys/signer{i}.key","wb").write(raw_sk)
+    open(f"test_keys/signer{i}.pub","wb").write(raw_pk)
+    pubs.append({'id': f'signer{i}', 'pubhex': raw_pk.hex()})
+signers = {'threshold': 3, 'signers': []}
+for p in pubs:
+    signers['signers'].append({'id': p['id'], 'pubkey_hex': p['pubhex']})
+open('signers.json','w').write(json.dumps(signers, indent=2))
+print('WROTE signer keys and signers.json')
+PY
+          ls -la test_keys
+          cat signers.json
+
+      - name: Sign the signed_input with each test signer (produce signatures/*)
+        run: |
+          mkdir -p signatures
+          for f in test_keys/*.key; do
+            id=$(basename "$f" .key)
+            ./target/release/ed25519sign --key "$f" --in ${OUT_DIR}/signed_input.bin --out "signatures/${id}.sig"
+          done
+          ls -la signatures
+
+      - name: Assemble t-of-n bundle (verify threshold locally if possible)
+        run: |
+          ./tools/zk-ceremony/bin/assemble_bundle.sh \
+            --vk ${OUT_DIR}/attestation_verifying_key.bin \
+            --meta ${OUT_DIR}/metadata.json \
+            --signers signers.json \
+            --sigs-dir signatures \
+            --out ${OUT_DIR}/attestation_bundle.tar.gz
+          echo "Bundle assembled:"
+          sha256sum ${OUT_DIR}/attestation_bundle.tar.gz
+
+      - name: Inspect assembled bundle (require threshold)
+        run: |
+          ./tools/zk-ceremony/bin/inspect_bundle.sh --bundle ${OUT_DIR}/attestation_bundle.tar.gz --require-threshold
+
+      - name: Run zk-embed to verify bundle and emit Rust snippet
+        run: |
+          ./target/release/zk-embed \
+            --bundle ${OUT_DIR}/attestation_bundle.tar.gz \
+            --program-id-str "zkmod-attestation-program-v1" \
+            --const-prefix ATTEST_V1 \
+            --out ${OUT_DIR}/vk_snippet.rs
+          echo "Snippet written to ${OUT_DIR}/vk_snippet.rs"
+          sed -n '1,40p' ${OUT_DIR}/vk_snippet.rs || true
+
+      - name: Validate snippet & build firmware with snippet (smoke-build)
+        run: |
+          if ! grep -q "ZK-EMBED:" ${OUT_DIR}/vk_snippet.rs; then
+            echo "ZK-EMBED marker missing in snippet" && exit 1
+          fi
+          cp ${OUT_DIR}/vk_snippet.rs src/zk/registry.rs
+          # Build the firmware crate with feature guards enabled (will run build.rs)
+          cargo build --release --features "zk-groth16 zk-vk-provisioned"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ceremony-artifacts
+          path: |
+            ${OUT_DIR}/attestation_bundle.tar.gz
+            ${OUT_DIR}/vk_snippet.rs
+            signers.json
+            signatures/
+            test_keys/
+
+      - name: Cleanup (always)
+        if: always()
+        run: |
+          echo "CI completed; artifacts uploaded."
