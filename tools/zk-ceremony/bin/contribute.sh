@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Contribute to a PoT transcript 
 set -euo pipefail
 
 IN=""
@@ -8,11 +9,12 @@ ENTROPY="/dev/random"
 POWERSOFTAU="${POWERSOFTAU:-powersoftau}"
 LOGDIR="${LOGDIR:-contrib_logs}"
 LOCAL_SIGN_KEY=""
+REDACT=true
 
 usage() {
   cat <<EOF
-contribute.sh --in <in.ptau> --out <out.ptau> --name "<Org:Name>" [--entropy <file>] [--tool <powersoftau>] [--local-sign-key <path>]
-Performs a single participant contribution to the PoT transcript with provenance logging.
+contribute.sh --in <in.ptau> --out <out.ptau> --name "<Org:Name>" [--entropy <file>] [--tool <powersoftau>] [--local-sign-key <path>] [--no-redact]
+Verifies prior transcript, contributes randomness, emits JSON log. PII is redacted by default.
 EOF
   exit 1
 }
@@ -25,6 +27,7 @@ while [[ $# -gt 0 ]]; do
     --entropy) ENTROPY="$2"; shift 2 ;;
     --tool) POWERSOFTAU="$2"; shift 2 ;;
     --local-sign-key) LOCAL_SIGN_KEY="$2"; shift 2 ;;
+    --no-redact) REDACT=false; shift 1 ;;
     -h|--help) usage ;;
     *) echo "Unknown arg: $1"; usage ;;
   esac
@@ -34,7 +37,8 @@ if [[ -z "${IN}" || -z "${OUT}" || -z "${NAME}" ]]; then
   usage
 fi
 
-command -v jq >/dev/null 2>&1 || { echo "jq is required"; exit 1; }
+command -v jq >/dev/null 2>&1 || { echo "jq required"; exit 1; }
+command -v "${POWERSOFTAU}" >/dev/null 2>&1 || { echo "powersoftau binary not found"; exit 1; }
 
 mkdir -p "${LOGDIR}"
 TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
@@ -52,6 +56,14 @@ POW_VER=$("${POWERSOFTAU}" --version 2>/dev/null || echo "unknown")
 HOSTNAME=$(hostname -f 2>/dev/null || hostname)
 UNAME=$(uname -a)
 
+if [[ "${REDACT}" == "true" ]]; then
+  HOST_FIELD="$(echo -n "${HOSTNAME}" | sha256sum | awk '{print $1}')"
+  UNAME_FIELD="$(echo -n "${UNAME}" | sha256sum | awk '{print $1}')"
+else
+  HOST_FIELD="${HOSTNAME}"
+  UNAME_FIELD="${UNAME}"
+fi
+
 jq -n --arg participant "${NAME}" \
       --arg input_transcript "$(basename "${IN}")" \
       --arg input_sha "${IN_SHA}" \
@@ -61,8 +73,8 @@ jq -n --arg participant "${NAME}" \
       --arg powersoftau_version "${POW_VER}" \
       --arg entropy "${ENTROPY}" \
       --arg timestamp "${TIMESTAMP}" \
-      --arg host "${HOSTNAME}" \
-      --arg uname "${UNAME}" \
+      --arg host_fingerprint "${HOST_FIELD}" \
+      --arg uname_fingerprint "${UNAME_FIELD}" \
       '{
         participant: $participant,
         input_transcript: $input_transcript,
@@ -73,21 +85,21 @@ jq -n --arg participant "${NAME}" \
         powersoftau_version: $powersoftau_version,
         entropy_source: $entropy,
         timestamp: $timestamp,
-        host: $host,
-        uname: $uname
+        host_fingerprint: $host_fingerprint,
+        uname_fingerprint: $uname_fingerprint
       }' > "${LOGFILE}"
 
 echo "[contrib] Contribution log: ${LOGFILE}"
 
 if [[ -n "${LOCAL_SIGN_KEY}" ]]; then
-  if command -v ed25519sign >/dev/null 2>&1; then
-    ed25519sign --key "${LOCAL_SIGN_KEY}" --in "${LOGFILE}" --out "${LOGFILE}.sig" || echo "[contrib] local signing failed"
+  if command -v ./target/release/ed25519sign >/dev/null 2>&1; then
+    ./target/release/ed25519sign --key "${LOCAL_SIGN_KEY}" --in "${LOGFILE}" --out "${LOGFILE}.sig" || echo "[contrib] local signing failed"
     echo "[contrib] Signed log: ${LOGFILE}.sig"
   else
-    echo "[contrib] ed25519sign not available; skip local signing. Use HSM in production."
+    echo "[contrib] ed25519sign not available; skip local signing. Use HSM for production."
   fi
 fi
 
 echo "contribution_complete=true"
 echo "contribution_log=${LOGFILE}"
-echo "Publish ${OUT} and ${LOGFILE} (and ${LOGFILE}.sig if present) to artifact store."
+echo "Publish ${OUT} and ${LOGFILE} (and ${LOGFILE}.sig if produced) to artifact store."
